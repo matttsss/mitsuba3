@@ -20,7 +20,7 @@ si.wi = mi.Vector3f(cp*st, sp*st, ct)
 
 ## Plugin
 sunsky = mi.load_dict({
-    'type': 'sunsky'
+    'type': 'avg_sunsky'
 })
 
 
@@ -65,5 +65,5 @@ def gen_avg(plugin, dir, N):
     return result
 
 avg_ray = gen_avg(sunsky, si, N)
-image = mi.TensorXf(dr.ravel(avg_ray), (*res, 3))
-mi.util.write_bitmap("test.exr", image)
+image = mi.TensorXf(dr.ravel(sunsky.eval(si)), (*res, 3))
+mi.util.write_bitmap("results/test.exr", image)
