@@ -5,16 +5,16 @@ import mitsuba as mi
 
 def get_spherical_rays_scalar(image_res):
     phis, thetas = np.meshgrid(
-        np.linspace(0.0, 2 * np.pi, image_res[1]),
-        np.linspace(np.pi, 0.0, image_res[0])
+        np.linspace(0.0, 2 * np.pi, image_res[1], endpoint=False),
+        np.linspace(np.pi, 0.0, image_res[0], endpoint=False)
     )
     phis, thetas = np.ravel(phis), np.ravel(thetas)
     return [np.cos(phis) * np.sin(thetas), np.sin(phis) * np.sin(thetas), np.cos(thetas)]
 
 def get_spherical_rays(image_res):
     phis, thetas = dr.meshgrid(
-        dr.linspace(mi.Float, 0.0, dr.two_pi, image_res[1]),
-        dr.linspace(mi.Float, dr.pi, 0.0, image_res[0])
+        dr.linspace(mi.Float, 0.0, dr.two_pi, image_res[1], endpoint=False),
+        dr.linspace(mi.Float, dr.pi, 0.0, image_res[0], endpoint=False)
     )
     sp, cp = dr.sincos(phis)
     st, ct = dr.sincos(thetas)
@@ -34,5 +34,6 @@ def render(plugin, resolution):
     
     else:
         si.wi = get_spherical_rays(resolution)
-        return mi.TensorXf(dr.ravel(plugin.eval(si)), (*resolution, 3))
+        colors = plugin.eval(si)
+        return mi.TensorXf(dr.ravel(colors), (*resolution, 3))
 
