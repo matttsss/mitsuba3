@@ -5,65 +5,23 @@ import mitsuba as mi
 
 mi.set_variant("cuda_ad_rgb")
 
-N = 200
+from helpers import render
+
 res = (512, 1024)
 
-## Rays
-phis, thetas = dr.meshgrid(
-    dr.linspace(mi.Float, 0.0, dr.two_pi, res[1]),
-    dr.linspace(mi.Float, dr.pi, 0.0, res[0]))
-sp, cp = dr.sincos(phis)
-st, ct = dr.sincos(thetas)
 
-si = dr.zeros(mi.SurfaceInteraction3f)
-si.wi = mi.Vector3f(cp*st, sp*st, ct)
+if __name__ == "__main__":
+    ## Plugin
+    avg_sunsky = mi.load_dict({
+        'type': 'avg_sunsky',
+        'time_resolution': 500,
+        'window_start_time': 6,
+        'window_end_time': 18
+    })
 
-## Plugin
-sunsky = mi.load_dict({
-    'type': 'avg_sunsky'
-})
+    # params = mi.traverse(avg_sunsky)
+    # params['sun_scale'] = 0
+    # params.update()
 
-
-# @dr.syntax
-# def gen_avg(plugin, dir, N):
-#     start_time, end_time = 9, 16
-#     dt = (end_time - start_time) / N
-#     sunsky_params = mi.traverse(plugin)
-# 
-#     result = dr.zeros(mi.Color3f, dr.prod(res))
-# 
-#     i = mi.Int(0)
-#     while mi.Bool(i < N):
-# 
-#         sunsky_params["hour"] = start_time + dt * i
-#         sunsky_params.update()
-# 
-#         result += sunsky.eval(dir)
-#         i += 1
-# 
-#     result /= N
-# 
-#     return result
-
-def gen_avg(plugin, dir, N):
-    start_time, end_time = 9, 16
-    dt = (end_time - start_time) / N
-    plugin_params = mi.traverse(plugin)
-
-    result = dr.zeros(mi.Color3f, dr.prod(res))
-
-    i = 0
-    while i < N:
-        plugin_params["hour"] = start_time + i*dt
-        plugin_params.update()
-
-        result += plugin.eval(dir)
-        i += 1
-
-    result /= N
-
-    return result
-
-avg_ray = gen_avg(sunsky, si, N)
-image = mi.TensorXf(dr.ravel(sunsky.eval(si)), (*res, 3))
-mi.util.write_bitmap("results/test.exr", image)
+    image = render(avg_sunsky, res)
+    mi.util.write_bitmap("results/test.exr", image)
