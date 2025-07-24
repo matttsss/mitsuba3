@@ -187,6 +187,7 @@ public:
 
     using EnvEmitter = Emitter<Float, Spectrum>;
     using FloatStorage = DynamicBuffer<Float>;
+    using UInt32Storage = DynamicBuffer<UInt32>;
     using ScalarFloatStorage = DynamicBuffer<ScalarFloat>;
 
     using ScalarLocation = LocationRecord<ScalarFloat>;
@@ -264,19 +265,24 @@ public:
 
 
         // ================== ENVMAP INSTANTIATION ==================
+        Properties envmap_props = Properties("envmap");
+        envmap_props.set("to_world", ScalarAffineTransform4f(m_to_world.scalar().matrix * s_permute_axis));
+
+
         ScalarInt32 bitmap_height = props.get<ScalarInt32>("bitmap_height", 255);
         if (bitmap_height <= 3)
             Log(Error, "Bitmap height must be greater than 3, given %d", bitmap_height);
 
         m_bitmap_resolution = {2 * bitmap_height, bitmap_height};
-        m_bitmap = compute_avg_bitmap();
 
-        // Permute axis for envmap's convention
-        ScalarAffineTransform4f envmap_transform { m_to_world.scalar().matrix * s_permute_axis };
+        FloatStorage bitmap_data = compute_avg_bitmap();
+                     bitmap_data = dr::migrate(bitmap_data, AllocType::Host);
+        if constexpr (dr::is_jit_v<Float>)
+            dr::sync_thread();
 
-        Properties envmap_props = Properties("envmap");
+        m_bitmap = new Bitmap(Bitmap::PixelFormat::RGB, struct_type_v<ScalarFloat>, m_bitmap_resolution, 3, {}, (uint8_t *)bitmap_data.data());
         envmap_props.set("bitmap", static_cast<ref<Object>>(m_bitmap));
-        envmap_props.set("to_world", envmap_transform);
+
         m_envmap = PluginManager::instance()->create_object<EnvEmitter>(envmap_props);
 
         m_flags = +EmitterFlags::Infinite | +EmitterFlags::SpatiallyVarying;
@@ -321,6 +327,7 @@ public:
         if (m_albedo_tex->is_spatially_varying())
             Log(Error, "Expected a non-spatially varying radiance spectra!");
 
+        m_nb_days = ScalarDateTime::get_days_between(m_start_date, m_end_date, m_location);
         if (m_window_start_time < 0.f || m_window_start_time > 24.f)
             Log(Error, "Start hour: %f is out of range [0, 24]", m_window_start_time);
         if (m_window_end_time < 0.f || m_window_end_time > 24.f)
@@ -330,6 +337,9 @@ public:
 
         EnvMapCallback envmap_cb;
         m_envmap->traverse(&envmap_cb);
+
+        if (unlikely(!envmap_cb.data))
+            Throw("Envmap callback did not find 'data' property of envmap");
 
         if (keys.empty() || string::contains(keys, "turbidity"))
             m_sun_rad_params = sun_params<SUN_DATASET_SIZE>(m_sun_rad_dataset, m_turbidity);
@@ -342,13 +352,30 @@ public:
             *envmap_cb.to_world = ScalarAffineTransform4f(m_to_world.scalar().matrix * s_permute_axis);
         }
 
-        m_nb_days = ScalarDateTime::get_days_between(m_start_date, m_end_date, m_location);
-        m_bitmap = compute_avg_bitmap();
+        FloatStorage bitmap_data = compute_avg_bitmap();
+        // Add an extra column
+        FloatStorage tensor_data = dr::zeros<FloatStorage>(dr::width(bitmap_data) + CHANNEL_COUNT * m_bitmap_resolution.y());
 
-        if (unlikely(!envmap_cb.data))
-            Throw("Envmap callback did not find 'data' property of envmap");
 
-        *envmap_cb.data = bitmap_to_envmap_tensor(m_bitmap);
+        // Scatter original image, leaving last column empty
+        ScalarUInt32 copy_width = CHANNEL_COUNT * m_bitmap_resolution.x(),
+                     real_width = copy_width + CHANNEL_COUNT;
+        UInt32Storage tensor_cpy_idx = dr::arange<UInt32Storage>(dr::width(bitmap_data));
+        const auto [tensor_cpy_idx_div, tensor_cpy_idx_mod] = dr::idivmod(tensor_cpy_idx, copy_width);
+
+        dr::scatter(tensor_data, bitmap_data, tensor_cpy_idx_div * real_width + tensor_cpy_idx_mod);
+
+        // Scatter first row into last to complete envmap formating
+        UInt32Storage row_cpy_idx = dr::arange<UInt32Storage>(CHANNEL_COUNT * m_bitmap_resolution.y());
+        const auto [row_cpy_idx_div, row_cpy_idx_mod] = dr::idivmod(tensor_cpy_idx, CHANNEL_COUNT);
+        FloatStorage first_row = dr::gather<FloatStorage>(bitmap_data, row_cpy_idx_div * copy_width + row_cpy_idx_mod);
+        dr::scatter(tensor_data, first_row, row_cpy_idx_div * real_width + row_cpy_idx_mod);
+
+        // Update envmap's tensor and notify it
+        size_t shape[3] = {m_bitmap->height(), m_bitmap->width() + 1, CHANNEL_COUNT};
+        dr::eval(tensor_data);
+
+        *envmap_cb.data = TensorXf(std::move(tensor_data), 3, shape);
         m_envmap->parameters_changed(envmap_keys);
 
     }
@@ -451,7 +478,7 @@ private:
             memcpy(tensor_line_start + copy_width, bitmap_line_start, bytes_per_pixel);
         }
 
-        size_t shape[3] = {bitmap->height(), bitmap->width() + 1, 3};
+        size_t shape[3] = {bitmap->height(), bitmap->width() + 1, CHANNEL_COUNT};
         TensorXf result_tensor = TensorXf(tensor_data, 3, shape);
 
         free(tensor_data);
@@ -523,19 +550,17 @@ private:
         const ScalarUInt32 nb_threads;
         const AvgSunskyEmitter *emitter;
         const FloatStorage albedo;
-        ref<Bitmap> bitmap;
+        FloatStorage& output;
     };
 
-    ref<Bitmap> compute_avg_bitmap() const {
-        ref<Bitmap> res_bitmap = new Bitmap(Bitmap::PixelFormat::RGB, struct_type_v<ScalarFloat>, m_bitmap_resolution, 3);
-        memset(res_bitmap->data(), 0, res_bitmap->buffer_size());
-
+    FloatStorage compute_avg_bitmap() const {
         FloatStorage albedo = extract_albedo(m_albedo_tex);
+        FloatStorage output = dr::zeros<FloatStorage>(CHANNEL_COUNT * dr::prod(m_bitmap_resolution));
 
         if constexpr (!dr::is_jit_v<Float>) {
 
             ThreadPayload payload = {
-                core_count(), this, albedo, res_bitmap
+                core_count(), this, albedo, output
             };
 
             task_submit_and_wait(nullptr, payload.nb_threads, compute_avg_bitmap_thread, &payload);
@@ -569,10 +594,9 @@ private:
             }
 
             Log(Info, "Using %zu time samples per wavefront and running %u iterations",
-                time_width, dr::ceil2int<ScalarUInt32>(nb_time_samples * ((float)nb_rays / UINT32_MAX))
+                time_width, dr::ceil2int<ScalarUInt32>(nb_time_samples * ((float)nb_rays / (float)UINT32_MAX))
             );
 
-            Color3f result = dr::zeros<Color3f>(nb_rays);
             const UInt32 frame_time_idx = dr::arange<UInt32>(time_width);
             auto [pixel_idx_wav, time_idx] = dr::meshgrid(pixel_idx, frame_time_idx);
 
@@ -603,24 +627,15 @@ private:
                 rays *= MI_CIE_Y_NORMALIZATION / nb_time_samples;
 
                 // Accumulate results
-                dr::scatter_add(result.r(), rays.r(), pixel_idx_wav, active);
-                dr::scatter_add(result.g(), rays.g(), pixel_idx_wav, active);
-                dr::scatter_add(result.b(), rays.b(), pixel_idx_wav, active);
+                dr::scatter_add(output, rays.r(), CHANNEL_COUNT * pixel_idx_wav + 0, active);
+                dr::scatter_add(output, rays.g(), CHANNEL_COUNT * pixel_idx_wav + 1, active);
+                dr::scatter_add(output, rays.b(), CHANNEL_COUNT * pixel_idx_wav + 2, active);
 
-                // TODO is it needed?
-                // Launch wavefront
-                // dr::eval(result);
             }
-
-            Float res = dr::migrate(dr::ravel(result), AllocType::Host);
-
-            dr::sync_thread();
-
-            memcpy(res_bitmap->data(), res.data(), 3 * sizeof(ScalarFloat) * nb_rays);
 
         }
 
-        return res_bitmap;
+        return output;
     }
 
     static void compute_avg_bitmap_thread(uint32_t thread_id, void* payload_) {
@@ -628,10 +643,8 @@ private:
         const AvgSunskyEmitter* emitter = static_cast<const AvgSunskyEmitter*>(payload->emitter);
 
         ScalarVector2u bitmap_resolution = emitter->m_bitmap_resolution;
-        ref<Bitmap> result = new Bitmap(Bitmap::PixelFormat::RGB, struct_type_v<ScalarFloat>, bitmap_resolution, 3);
-        memset(result->data(), 0, result->buffer_size());
 
-        ScalarFloat* bitmap_data = static_cast<ScalarFloat*>(result->data());
+        FloatStorage bitmap_data = dr::zeros<FloatStorage>(3 * dr::prod(bitmap_resolution));
 
         const size_t nb_rays = bitmap_resolution.x() * (bitmap_resolution.y() / 2 + 1);
         const uint32_t nb_time_samples = emitter->m_time_resolution * (emitter->m_time_samples_per_day ? emitter->m_nb_days : 1);
@@ -664,16 +677,16 @@ private:
                         eval_sun<ScalarColor3f>({0, 1, 2}, ray_dir.z(), gamma, emitter->m_sun_rad_params, emitter->m_sun_half_aperture, gamma < emitter->m_sun_half_aperture);
                 res *= MI_CIE_Y_NORMALIZATION / nb_time_samples;
 
-                bitmap_data[3 * pixel_idx + 0] += res.r();
-                bitmap_data[3 * pixel_idx + 1] += res.g();
-                bitmap_data[3 * pixel_idx + 2] += res.b();
+                dr::scatter_add(bitmap_data, res.r(), CHANNEL_COUNT * pixel_idx + 0);
+                dr::scatter_add(bitmap_data, res.g(), CHANNEL_COUNT * pixel_idx + 1);
+                dr::scatter_add(bitmap_data, res.b(), CHANNEL_COUNT * pixel_idx + 2);
 
             }
 
         }
 
         std::lock_guard guard(s_bitmap_mutex);
-        payload->bitmap->accumulate(result);
+        dr::scatter_add(payload->output, bitmap_data, dr::arange<UInt32Storage>(CHANNEL_COUNT * nb_rays));
 
     }
 
