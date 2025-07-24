@@ -1,3 +1,5 @@
+#include <drjit/tensor.h>
+
 #include <mitsuba/core/warp.h>
 #include <mitsuba/core/bitmap.h>
 #include <mitsuba/render/emitter.h>
@@ -156,6 +158,27 @@ this plugin to work properly.
         'start_year': 2026
 
 */
+
+
+template <typename TensorXf, typename ToWorld>
+struct EnvMapCB : public TraversalCallback {
+
+    void put_object(std::string_view, Object*, uint32_t) override {
+        Throw("put_object is not implemented for this custom traversal callback");
+    }
+
+    void put_value(std::string_view name, void *val, uint32_t, const std::type_info &) override {
+        if (name == "data") {
+            data = static_cast<TensorXf*>(val);
+        } else if (name == "to_world") {
+            to_world = static_cast<ToWorld*>(val);
+        }
+    }
+
+    ToWorld* to_world = nullptr;
+    TensorXf* data = nullptr;
+};
+
 template <typename Float, typename Spectrum>
 class AvgSunskyEmitter final : public Emitter<Float, Spectrum> {
 public:
@@ -168,6 +191,8 @@ public:
 
     using ScalarLocation = LocationRecord<ScalarFloat>;
     using ScalarDateTime = DateTimeRecord<ScalarFloat>;
+
+    using EnvMapCallback = EnvMapCB<TensorXf, field<AffineTransform4f, ScalarAffineTransform4f>>;
 
     using SkyRadDataset    = std::conditional_t<dr::is_jit_v<Float>, Color3f, FloatStorage>;
     using SkyParamsDataset = std::conditional_t<dr::is_jit_v<Float>, dr::Array<Color3f, SKY_PARAMS>, FloatStorage>;
@@ -205,6 +230,10 @@ public:
         if (m_window_start_time > m_window_end_time)
             Log(Error, "The given start time is greater than the end time");
 
+        m_time_resolution = props.get<ScalarUInt32>("time_resolution", 500);
+        if (m_time_resolution <= 0)
+            Log(Error, "Time resolution must be greater than 0, got %u", m_time_resolution);
+
         m_location = ScalarLocation{props};
         m_start_date.year = props.get<ScalarInt32>("start_year", 2025);
         m_start_date.month = props.get<ScalarInt32>("start_month", 1);
@@ -217,7 +246,6 @@ public:
         m_nb_days = ScalarDateTime::get_days_between(m_start_date, m_end_date, m_location);
 
         m_time_samples_per_day = props.get<bool>("time_samples_per_day", true);
-        m_time_resolution = props.get<ScalarUInt32>("time_resolution", 500);
 
         dr::make_opaque(m_start_date, m_end_date, m_location);
 
@@ -300,30 +328,32 @@ public:
         if (m_window_start_time > m_window_end_time)
             Log(Error, "The given start time is greater than the end time");
 
+        EnvMapCallback envmap_cb;
+        m_envmap->traverse(&envmap_cb);
 
         if (keys.empty() || string::contains(keys, "turbidity"))
             m_sun_rad_params = sun_params<SUN_DATASET_SIZE>(m_sun_rad_dataset, m_turbidity);
 
+        std::vector<std::string> envmap_keys = {"data"};
+        if (keys.empty() || string::contains(keys, "to_world")) {
+            envmap_keys.emplace_back("to_world");
+            if (unlikely(!envmap_cb.to_world))
+                Throw("Envmap callback did not find 'to_world' property of envmap");
+            *envmap_cb.to_world = ScalarAffineTransform4f(m_to_world.scalar().matrix * s_permute_axis);
+        }
+
         m_nb_days = ScalarDateTime::get_days_between(m_start_date, m_end_date, m_location);
         m_bitmap = compute_avg_bitmap();
 
-        // Permute axis for envmap's convention
-        ScalarAffineTransform4f envmap_transform { m_to_world.scalar().matrix * s_permute_axis };
+        if (unlikely(!envmap_cb.data))
+            Throw("Envmap callback did not find 'data' property of envmap");
 
-        // Cannot update envmap in place through a traversal since
-        // the input bitmap gets processed correctly only in the constructor
-        Properties envmap_props = Properties("envmap");
-        envmap_props.set("bitmap", static_cast<ref<Object>>(m_bitmap));
-        envmap_props.set("to_world", envmap_transform);
-        m_envmap = PluginManager::instance()->create_object<EnvEmitter>(envmap_props);
-
-        if (m_scene)
-            m_envmap->set_scene(m_scene);
+        *envmap_cb.data = bitmap_to_envmap_tensor(m_bitmap);
+        m_envmap->parameters_changed(envmap_keys);
 
     }
 
     MI_INLINE void set_scene(const Scene *scene) override {
-        m_scene = scene;
         m_envmap->set_scene(scene);
     }
 
@@ -397,6 +427,37 @@ public:
     MI_DECLARE_CLASS(AvgSunskyEmitter)
 
 private:
+
+    static TensorXf bitmap_to_envmap_tensor(const ref<Bitmap> &bitmap) {
+        size_t bytes_per_pixel = bitmap->bytes_per_pixel();
+        // Sanity check
+        if (unlikely(bytes_per_pixel != 3 * sizeof(ScalarFloat)))
+            Throw("Unexpected bitmap");
+
+        size_t copy_width = bitmap->width() * bytes_per_pixel;
+        size_t nb_lines_to_copy = bitmap->height() / 2 + 1;
+
+        // Allocate room for new tensor data with an extra column
+        uint8_t* tensor_data = (uint8_t*)calloc((bitmap->width() + 1) * bitmap->height(), bytes_per_pixel);
+
+        for (size_t line_idx = 0; line_idx < nb_lines_to_copy; line_idx++) {
+
+            uint8_t* tensor_line_start = tensor_data + line_idx * (copy_width + bytes_per_pixel);
+            const uint8_t* bitmap_line_start = bitmap->uint8_data() + line_idx * copy_width;
+
+            // Copy first row over
+            memcpy(tensor_line_start, bitmap_line_start, copy_width);
+            // Repeat last pixel as the first one of the row
+            memcpy(tensor_line_start + copy_width, bitmap_line_start, bytes_per_pixel);
+        }
+
+        size_t shape[3] = {bitmap->height(), bitmap->width() + 1, 3};
+        TensorXf result_tensor = TensorXf(tensor_data, 3, shape);
+
+        free(tensor_data);
+
+        return result_tensor;
+    }
 
     struct Datasets {
         Vector3f sun_dir;
@@ -687,9 +748,6 @@ private:
     ref<Bitmap> m_bitmap;
     ref<EnvEmitter> m_envmap;
     ScalarVector2u m_bitmap_resolution;
-
-    // Used to re-set the envmap scene on update
-    const Scene* m_scene = nullptr;
 
     static ScalarMatrix4f s_permute_axis;
 
