@@ -14,7 +14,8 @@ if __name__ == "__main__":
 
     point_average = mi.load_dict({
         "type": "avg_sunsky",
-        "time_resolution": 2,
+        "time_samples_per_day": 2,
+        "albedo": mi.ScalarColor3f(0, 0, 1),
         "end_year": 2025,
         "end_day": 2,
         "window_start_time": 10,
@@ -24,6 +25,7 @@ if __name__ == "__main__":
 
     sky = mi.load_dict({
         "type": "sunsky",
+        "albedo":  mi.ScalarColor3f(0, 0, 1),
         "year": 2025,
         "month": 1,
         "day": 1,

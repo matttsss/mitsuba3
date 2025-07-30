@@ -32,6 +32,7 @@ def view(scene_params):
         ps.register_surface_mesh(mesh_id, postions, faces)
 
     vertex_id = mi.UInt32(0, 1, 2, 3, 14, 15, 16, 40)
+    #vertex_id = dr.arange(mi.UInt32, len(scene_params['Walls_0001.vertex_positions'])//3)
     vertices = dr.gather(mi.Point3f, scene_params['Walls_0001.vertex_positions'], vertex_id).numpy()
     vertices = np.transpose(vertices)
 

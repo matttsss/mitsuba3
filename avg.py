@@ -14,9 +14,10 @@ if __name__ == "__main__":
     ## Plugin
     avg_sunsky = mi.load_dict({
         'type': 'avg_sunsky',
-        'time_resolution': 500,
+        'time_samples_per_day': 400,
         'window_start_time': 6,
-        'window_end_time': 18
+        'window_end_time': 18,
+        'sun_aperture': 1.5,
     })
 
     # params = mi.traverse(avg_sunsky)
@@ -24,4 +25,5 @@ if __name__ == "__main__":
     # params.update()
 
     image = render(avg_sunsky, res)
+    image = mi.Bitmap(image).convert(mi.Bitmap.PixelFormat.RGB, mi.Bitmap.Float32)
     mi.util.write_bitmap("results/test.exr", image)
