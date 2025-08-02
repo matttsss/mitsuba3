@@ -43,5 +43,22 @@ if True:
     mi.util.write_bitmap("results/kitchen.exr", image)
     mi.util.write_bitmap("results/kitchen_grad.exr", grad)
 else:
-    from polyscope_viz import view
-    view(kitchen_params)
+    import numpy as np
+    import polyscope as ps
+    from polyscope_viz import get_meshes
+
+    ps.init()
+
+    meshes = get_meshes(kitchen_params)
+
+    for mesh_id, mesh in meshes.items():
+        ps.register_surface_mesh(mesh_id, mesh['vertex_positions'], mesh['faces'])
+
+
+    vertex_id = mi.UInt32(0, 1, 2, 3, 14, 15, 16, 40)
+    vertices = dr.gather(mi.Point3f, kitchen_params['Walls_0001.vertex_positions'], vertex_id).numpy()
+    vertices = np.transpose(vertices)
+
+    ps.register_point_cloud("Frame", vertices)
+
+    ps.show()

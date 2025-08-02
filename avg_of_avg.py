@@ -10,7 +10,7 @@ res = (512, 1024)
 if __name__ == "__main__":
     monthly_average = mi.load_dict({
         "type": "avg_sunsky",
-        "time_resolution": 20,
+        "time_samples_per_day": 20,
         "end_year": 2025,
         "end_month": 2,
         "end_day": 1
@@ -18,7 +18,7 @@ if __name__ == "__main__":
 
     bimonthly_average = mi.load_dict({
         "type": "avg_sunsky",
-        "time_resolution": 20,
+        "time_samples_per_day": 20,
         "end_year": 2025,
         "end_month": 3,
         "end_day": 1
