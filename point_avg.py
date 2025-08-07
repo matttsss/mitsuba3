@@ -3,7 +3,7 @@ import numpy as np
 import drjit as dr
 import mitsuba as mi
 
-mi.set_variant("llvm_ad_rgb")
+mi.set_variant("cuda_ad_rgb")
 
 from helpers import render
 
@@ -13,14 +13,14 @@ res = (255, 512)
 if __name__ == "__main__":
 
     point_average = mi.load_dict({
-        "type": "avg_sunsky",
-        "time_samples_per_day": 2,
+        "type": "timed_sunsky",
         "albedo": mi.ScalarColor3f(0, 0, 1),
         "end_year": 2025,
         "end_day": 2,
         "window_start_time": 10,
         "window_end_time": 10,
-        "sun_scale": 0
+        "sun_aperture": 10,
+        "sun_scale": 1,
     })
 
     sky = mi.load_dict({
@@ -32,7 +32,8 @@ if __name__ == "__main__":
         "hour": 10,
         "minute": 0,
         "second": 0,
-        "sun_scale": 0
+        "sun_aperture": 10,
+        "sun_scale": 1,
     })
 
     

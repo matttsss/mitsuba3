@@ -185,5 +185,4 @@ tgmm_tables = my_read_tensor('../mitsuba3/resources/data/sunsky/output/tgmm_tabl
 write_tensor('datasets/sunsky_datasets.bin', 
              sky_rad_rgb=sky_rad_rgb, sky_params_rgb=sky_params_rgb, sky_rad_spec=sky_rad_spec, sky_params_spec=sky_params_spec, 
              sun_rad_rgb=sun_rad_rgb, sun_rad_spec=sun_rad_spec, sun_ld_spec=sun_ld_spec, 
-             tgmm_tables=tgmm_tables
 )
