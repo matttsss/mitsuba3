@@ -13,8 +13,7 @@ res = (255, 512)
 if __name__ == "__main__":
 
     point_average = mi.load_dict({
-        "type": "avg_sunsky",
-        "time_resolution": 2,
+        "type": "timed_sunsky",
         "end_year": 2025,
         "end_day": 2,
         "window_start_time": 10,
