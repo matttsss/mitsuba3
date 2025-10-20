@@ -32,7 +32,7 @@ def eval(sky_params, cos_theta, gamma):
     c1 = 1 + sky_params[..., 0, dr.newaxis] * dr.exp(sky_params[..., 1, dr.newaxis] / (cos_theta + 0.01))
     chi = (1 + cos_gamma_2) / ((1 + sky_params[..., 8, dr.newaxis]**2 - 2 * sky_params[..., 8, dr.newaxis] * cos_gamma)**1.5)
     c2 = sky_params[..., 2, dr.newaxis] + sky_params[..., 3, dr.newaxis] * dr.exp(sky_params[..., 4, dr.newaxis] * gamma) + \
-         sky_params[..., 5, dr.newaxis] * cos_gamma_2 + sky_params[..., 6, dr.newaxis] * chi #+ sky_params[..., 7, dr.newaxis] * dr.safe_sqrt(cos_theta)
+         sky_params[..., 5, dr.newaxis] * cos_gamma_2 + sky_params[..., 6, dr.newaxis] * chi + sky_params[..., 7, dr.newaxis] * dr.safe_sqrt(cos_theta)
 
     return c1 * c2
 
@@ -80,7 +80,7 @@ def eval_luminance(func, sky_rad, sky_params, cos_theta, gamma):
 
         lum *= mi.MI_CIE_D65_NORMALIZATION
 
-    return dr.reshape(mi.TensorXf, lum, image_res)[::-1]
+    return lum
 
 
 def compute_parts(funcs, extra_funcs, sky_rad, sky_params, cos_theta, gamma):
@@ -90,6 +90,7 @@ def compute_parts(funcs, extra_funcs, sky_rad, sky_params, cos_theta, gamma):
     for f, extra_f in product(funcs, [lambda *args: 1] + extra_funcs):
         partial_pdf = lambda sky_params, cos_theta, gamma: extra_f(sky_params, cos_theta, gamma) * f(sky_params, cos_theta, gamma)
         res = eval_luminance(partial_pdf, sky_rad, sky_params, cos_theta, gamma)
+        res = mi.TensorXf(res, shape=image_res)
         parts.append(res)
 
     return parts
@@ -114,6 +115,7 @@ def make_avg(sky_rad_dataset, sky_params_dataset, view_dirs, elevation_res=20, t
 
         res += eval_luminance(eval, sky_rad, sky_params, cos_theta, gamma)
 
+    res = mi.TensorXf(res, shape=image_res)
     return res / (elevation_res * t_res * alb_res)
 
 
