@@ -12,6 +12,7 @@ def load_tensors(file_path):
 
     return mi.TensorXf(sky_rad), mi.TensorXf(sky_params)
 
+@dr.freeze
 def interpolate_dataset(dataset, albedo, turbidity, eta):
     dataset = dr.take_interp(dataset, turbidity - 1)
     dataset = dr.take_interp(dataset, albedo)
