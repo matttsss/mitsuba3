@@ -12,17 +12,32 @@ def load_tensors(file_path):
 
     return mi.TensorXf(sky_rad), mi.TensorXf(sky_params)
 
-@dr.freeze
-def interpolate_dataset(dataset, albedo, turbidity, eta):
-    dataset = dr.take_interp(dataset, turbidity - 1)
-    dataset = dr.take_interp(dataset, albedo)
+@dr.syntax
+def interpolate_dataset(dataset, albedo, turb_, eta_):
+    dataset = dr.take_interp(dataset, albedo, axis=1)
 
-    eta = (2. * eta * dr.inv_pi) ** (1/3)
+    eta = (2. * eta_ * dr.inv_pi) ** (1/3)
+    turb = turb_ - 1
 
-    res = 0
-    coefs = 1, 5, 10, 10, 5, 1
-    for i in range(6):
-        res += dataset[i] * (eta**i) * ((1 - eta)**(5 - i)) * coefs[i]
+    turb0 = mi.UInt32(dr.floor(turb))
+    dturb = dr.clip(eta_ - turb0, 0, 1)
+
+    bezier_coefs = dr.alloc_local(mi.Float, 6, mi.Float(0))
+    for i, coef in enumerate((1, 5, 10, 10, 5, 1)):
+        bezier_coefs[i] = mi.ScalarFloat(coef)
+    
+    res_shape = (dr.prod(dataset.shape[2:]), dr.width(turb_))
+    res = dr.zeros(mi.ArrayXf, shape=res_shape)
+
+    idx = mi.UInt32(0)
+    while idx < 6:
+        turb_low = dr.gather(mi.ArrayXf, dataset.array, turb0 * 6 + idx, shape=res_shape)
+        turb_high = dr.gather(mi.ArrayXf, dataset.array, (turb0 + 1) * 6 + idx, active=turb0+1<=9, shape=res_shape)
+
+        temp = dr.lerp(turb_low, turb_high, dturb)
+        res += temp * (eta**idx) * ((1 - eta)**(5 - idx)) * bezier_coefs[idx]
+
+        idx += 1
 
     return res
 
