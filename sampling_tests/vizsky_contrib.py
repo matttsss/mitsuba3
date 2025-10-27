@@ -20,7 +20,7 @@ def interpolate_dataset(dataset, albedo, turb_, eta_):
     turb = turb_ - 1
 
     turb0 = mi.UInt32(dr.floor(turb))
-    dturb = dr.clip(eta_ - turb0, 0, 1)
+    dturb = dr.clip(turb - turb0, 0, 1)
 
     bezier_coefs = dr.alloc_local(mi.Float, 6, mi.Float(0))
     for i, coef in enumerate((1, 5, 10, 10, 5, 1)):
