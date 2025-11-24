@@ -1,11 +1,13 @@
 import drjit as dr
 import mitsuba as mi
 
-mi.set_variant("cuda_ad_rgb")
+mi.set_variant("llvm_ad_rgb")
 
 t_sunsky = mi.load_dict({
         "type": "timed_sunsky",
         "complex_sun": False,
+        "sky_scale": 0.0,
+        "sun_scale": 0.0,
 })
 dr.eval(t_sunsky)
 
