@@ -1,0 +1,13 @@
+# drjit
+# mitsuba
+
+numpy
+matplotlib
+
+torch
+torch-ema
+torchvision
+
+accelerate
+diffusers
+transformers
