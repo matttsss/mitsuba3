@@ -20,12 +20,8 @@ class StableDiffusion:
 
 
     @torch.no_grad()
-    def prep(self, prompt: str, negative_prompt: str, guidance_scale: float):
-        # Encodes prompt and precomputes what is needed for denoising loop
-        self.pipe._guidance_scale = guidance_scale
-
+    def encode_prompt(self, prompt: str, negative_prompt: str, guidance_scale: float):
         do_cfg = guidance_scale > 1.0
-        device = self.pipe._execution_device
 
         (
             prompt_embeds,
@@ -40,7 +36,7 @@ class StableDiffusion:
             negative_prompt_2=negative_prompt,
             negative_prompt_3=negative_prompt,
             do_classifier_free_guidance=do_cfg,
-            device=device,
+            device=self.device,
         )
 
         if do_cfg:
@@ -55,29 +51,8 @@ class StableDiffusion:
             'do_cfg': do_cfg,
         }
     
-
-    def prepare_latents(self, render_size):
-        return self.pipe.prepare_latents(
-            1,
-            self.pipe.transformer.config.in_channels,
-            render_size,
-            render_size,
-            self.pipe.transformer.dtype,
-            self.device,
-            self.generator
-        )
-    
-    def decode_latents(self, latents):
-        latents = (latents / self.pipe.vae.config.scaling_factor) + self.pipe.vae.config.shift_factor
-        return self.pipe.vae.decode(latents, return_dict=False)[0]
-    
-    def encode_image(self, image, vae_shift_factor):
-        image = self.pipe.vae.encode(image).latent_dist.sample(generator=self.generator)
-        return (image - vae_shift_factor) * self.pipe.vae.config.scaling_factor
-    
-    @torch.no_grad()
     def latent_step(self, latents: torch.Tensor, depth: torch.Tensor, prompt_embeddings, timestep, controlnet_conditioning_scale):
-        device = self.pipe._execution_device
+        device = self.device
         dtype = self.pipe.transformer.dtype
 
         prompt_embeds = prompt_embeddings['prompt_embeds']
@@ -151,8 +126,46 @@ class StableDiffusion:
 
         return latents
 
-    @torch.no_grad()
     def step(self, image: torch.Tensor, depth: torch.Tensor, prompt_embeddings, timestep, controlnet_conditioning_scale):
         latents = self.encode_image(image, self.pipe.vae.config.shift_factor)
         latents = self.latent_step(latents, depth, prompt_embeddings, timestep, controlnet_conditioning_scale)
         return self.decode_latents(latents)
+
+
+    @torch.no_grad()
+    def generate(self, prompt: str, negative_prompt: str, guidance_scale: float, 
+                       num_inference_steps: int, controlnet_conditioning_scale: float, depth: torch.Tensor):
+        
+        prompt_embeddings = self.encode_prompt(prompt, negative_prompt, guidance_scale)
+        
+        self.pipe.scheduler.set_timesteps(num_inference_steps, device=self.device)
+        timesteps = self.pipe.scheduler.timesteps
+
+        latents = self.prepare_latents(depth.shape[-1])
+        for t in timesteps:
+            latents = self.latent_step(latents, depth, prompt_embeddings, t, controlnet_conditioning_scale)
+
+        image = self.decode_latents(latents)
+        image = self.pipe.image_processor.postprocess(image, output_type='pt')
+
+        return image
+    
+
+    def prepare_latents(self, render_size):
+        return self.pipe.prepare_latents(
+            1,
+            self.pipe.transformer.config.in_channels,
+            render_size,
+            render_size,
+            self.pipe.transformer.dtype,
+            self.device,
+            self.generator
+        )
+    
+    def decode_latents(self, latents):
+        latents = (latents / self.pipe.vae.config.scaling_factor) + self.pipe.vae.config.shift_factor
+        return self.pipe.vae.decode(latents, return_dict=False)[0]
+    
+    def encode_image(self, image, vae_shift_factor):
+        image = self.pipe.vae.encode(image).latent_dist.sample(generator=self.generator)
+        return (image - vae_shift_factor) * self.pipe.vae.config.scaling_factor
