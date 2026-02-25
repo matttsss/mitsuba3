@@ -5,15 +5,6 @@ import torch
 import drjit as dr
 import mitsuba as mi
 
-def load_scene(path: str, sensor_size: int = 1024) -> tuple[mi.Scene, mi.SceneParameters]:
-    scene = mi.load_file(path)
-    scene_params = mi.traverse(scene)
-
-    scene_params['camera.film.size'] = [sensor_size, sensor_size]
-
-    scene_params.update()
-    return scene, scene_params
-
 def randomize_sensor(generator: dr.random.Generator, scene_params: mi.SceneParameters, 
                      sensor_to_world_key: str, target: mi.ScalarVector3f = [0, 10, 0], radius: float = 50) -> None:
     # Sample a random azimuth uniformly

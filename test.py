@@ -3,7 +3,8 @@ import torch, random
 import drjit as dr
 import mitsuba as mi
 
-from renderer import load_scene, randomize_sensor, get_frame, get_depth
+from scenes.dragon import load_scene
+from renderer import randomize_sensor, get_frame, get_depth
 
 mi.set_variant('cuda_ad_rgb')
 
@@ -22,7 +23,7 @@ device = torch.device('cuda')
 pt_generator = torch.manual_seed(seed)
 dr_generator = dr.rng(seed=seed)
 
-scene, scene_params = load_scene('../dragon/scene.xml', render_size)
+scene, scene_params = load_scene(render_size)
 #randomize_sensor(dr_generator, scene_params, 'camera.to_world')
 
 # Render depth and RGB frame
