@@ -51,7 +51,7 @@ class StableDiffusion:
             'do_cfg': do_cfg,
         }
     
-    def latent_step(self, latents: torch.Tensor, depth: torch.Tensor, prompt_embeddings, timestep, controlnet_conditioning_scale):
+    def predict_velocity(self, latents: torch.Tensor, depth: torch.Tensor, prompt_embeddings, timestep, controlnet_conditioning_scale):
         device = self.device
         dtype = self.pipe.transformer.dtype
 
@@ -106,7 +106,7 @@ class StableDiffusion:
         )[0]
 
         # Transformer forward pass (single denoising step)
-        noise_pred = self.pipe.transformer(
+        velocity_pred = self.pipe.transformer(
             hidden_states=latent_model_input,
             timestep=t_expanded,
             encoder_hidden_states=prompt_embeds,
@@ -118,19 +118,10 @@ class StableDiffusion:
 
         # Classifier-free guidance
         if do_cfg:
-            noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
-            noise_pred = noise_pred_uncond + self.pipe._guidance_scale * (noise_pred_text - noise_pred_uncond)
+            velocity_pred_uncond, velocity_pred_text = velocity_pred.chunk(2)
+            velocity_pred = velocity_pred_uncond + 7.5 * (velocity_pred_text - velocity_pred_uncond)
 
-        # Compute x_{t-1} from the noise prediction
-        latents = self.pipe.scheduler.step(noise_pred, t, latents, return_dict=False)[0]
-
-        return latents
-
-    def step(self, image: torch.Tensor, depth: torch.Tensor, prompt_embeddings, timestep, controlnet_conditioning_scale):
-        latents = self.encode_image(image, self.pipe.vae.config.shift_factor)
-        latents = self.latent_step(latents, depth, prompt_embeddings, timestep, controlnet_conditioning_scale)
-        return self.decode_latents(latents)
-
+        return velocity_pred
 
     @torch.no_grad()
     def generate(self, prompt: str, negative_prompt: str, guidance_scale: float, 
@@ -143,7 +134,8 @@ class StableDiffusion:
 
         latents = self.prepare_latents(depth.shape[-1])
         for t in timesteps:
-            latents = self.latent_step(latents, depth, prompt_embeddings, t, controlnet_conditioning_scale)
+            velocity_pred = self.predict_velocity(latents, depth, prompt_embeddings, t, controlnet_conditioning_scale)
+            latents = self.pipe.scheduler.step(velocity_pred, t, latents, return_dict=False)[0]
 
         image = self.decode_latents(latents)
         image = self.pipe.image_processor.postprocess(image, output_type='pt')

@@ -3,7 +3,7 @@ import torch, random
 import drjit as dr
 import mitsuba as mi
 
-from renderer import load_scene, get_frame
+from renderer import load_scene, randomize_sensor, get_frame, get_depth
 
 mi.set_variant('cuda_ad_rgb')
 
@@ -23,26 +23,30 @@ pt_generator = torch.manual_seed(seed)
 dr_generator = dr.rng(seed=seed)
 
 scene, scene_params = load_scene('../dragon/scene.xml', render_size)
+#randomize_sensor(dr_generator, scene_params, 'camera.to_world')
 
-# Render frame and extract depth
-image, depth = get_frame(dr_generator, scene, scene_params, 'camera.to_world', debug_path="outputs/dragon_rgb.png")
+# Render depth and RGB frame
+depth = get_depth(scene, debug_path="outputs/dragon_depth.png")
+image = get_frame(scene, debug_path="outputs/dragon_rgb.png")
+
+depth: torch.Tensor = depth.torch()
+depth = depth.unsqueeze(0).repeat(3, 1, 1).unsqueeze(0)
 
 if True:
     from sd import StableDiffusion
 
-    with torch.no_grad():
-        sd = StableDiffusion(device=device, generator=pt_generator, enable_offload=True)
-        image = sd.generate(
-            prompt=prompt,
-            negative_prompt=negative_prompt,
-            num_inference_steps=num_inference_steps,
-            guidance_scale=guidance_scale,
-            controlnet_conditioning_scale=controlnet_conditioning_scale,
-            depth=depth
-        )
+    sd = StableDiffusion(device=device, generator=pt_generator, enable_offload=True)
+    image = sd.generate(
+        prompt=prompt,
+        negative_prompt=negative_prompt,
+        num_inference_steps=num_inference_steps,
+        guidance_scale=guidance_scale,
+        controlnet_conditioning_scale=controlnet_conditioning_scale,
+        depth=depth
+    )
 
-        image = image.squeeze(0).cpu().permute(1, 2, 0).numpy()
-        mi.util.write_bitmap('outputs/dragon_sd.png', image)
+    image = image.squeeze(0).cpu().permute(1, 2, 0).numpy()
+    mi.util.write_bitmap('outputs/dragon_sd.png', image)
 
 else:
 

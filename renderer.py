@@ -14,7 +14,8 @@ def load_scene(path: str, sensor_size: int = 1024) -> tuple[mi.Scene, mi.ScenePa
     scene_params.update()
     return scene, scene_params
 
-def random_look_at(generator: dr.random.Generator, target: mi.ScalarVector3f, radius: float) -> mi.Transform4f:
+def randomize_sensor(generator: dr.random.Generator, scene_params: mi.SceneParameters, 
+                     sensor_to_world_key: str, target: mi.ScalarVector3f = [0, 10, 0], radius: float = 50) -> None:
     # Sample a random azimuth uniformly
     phi = generator.random(mi.ScalarFloat, 1) * dr.two_pi
     # Sample near the horizon
@@ -26,40 +27,54 @@ def random_look_at(generator: dr.random.Generator, target: mi.ScalarVector3f, ra
 
     origin = target + offset * radius
 
-    return mi.Transform4f.look_at(origin=origin, target=target, up=mi.ScalarVector3f(0, 1, 0))
-
-def get_frame(generator: dr.random.Generator, 
-              scene: mi.Scene, scene_params: mi.SceneParameters, 
-              sensor_to_world_key: str, debug_path: str = "") -> tuple[torch.Tensor, torch.Tensor]:
-    
-    scene_params[sensor_to_world_key] = random_look_at(generator, mi.ScalarVector3f(0, 10, 0), 50)
+    scene_params[sensor_to_world_key] = mi.Transform4f.look_at(origin=origin, target=target, up=mi.ScalarVector3f(0, 1, 0))
     scene_params.update()
 
-    image = mi.render(scene)
+@dr.freeze
+def get_depth(scene: mi.Scene, debug_path: str = "") -> mi.TensorXf:
+    film = scene.sensors()[0].film()
+    film_size = film.size()
 
-    depth = dr.detach(image[..., 3])
+    idx = dr.arange(mi.Int32, film_size[0] * film_size[1])
+    pos_y = idx // film_size[0]
+    pos = mi.Vector2f(mi.ScalarInt32(-film_size[0]) * pos_y + idx, pos_y)
+
+    if film.sample_border():
+        pos -= film.rfilter().border_size()
+
+    pos += film.crop_offset()
+
+    scale = 1. / mi.ScalarVector2f(film.crop_size())
+    offset = -mi.ScalarVector2f(film.crop_offset()) * scale
+
+    sample_pos = pos + mi.ScalarVector2f(0.5, 0.5)
+    adjusted_pos = dr.fma(sample_pos, scale, offset)
+
+    ray, _ = scene.sensors()[0].sample_ray_differential(
+        time=0, sample1=0, sample2=adjusted_pos, sample3=0.5)
+
+    pi = scene.ray_intersect_preliminary(ray, coherent=True)
+
+    depth = dr.select(pi.is_valid(), pi.t, 0.0)
+    depth /= dr.max(depth)
+    depth = dr.select(depth == 0, 0, 1 - depth)
+
+    depth = mi.TensorXf(depth, shape=(film_size[1], film_size[0]))
+
+    if debug_path != "":
+        mi.util.write_bitmap(debug_path, depth)
+
+    return depth
+
+
+def get_frame(scene: mi.Scene, debug_path: str = "") -> torch.Tensor:
+
+    image = mi.render(scene)
     image = image[..., :3]
 
     if debug_path != "":
         mi.util.write_bitmap(debug_path, image)
 
-    # Normalize depth values to the range [0, 1]
-    depth /= dr.max(depth)
-
-    # Invert depth values so that closer objects have higher values
-    depth = dr.select(depth == 0, 0, 1 - depth)
-
-    # Blur to smooth artifacts issued by the integrator
-    depth = dr.convolve(
-        depth, filter='box', filter_radius=3
-    )
-
-    # Convert depth to a 3-channel image and repeat it for the channel dimension
-    depth: torch.Tensor = depth.torch()
-    depth = depth.unsqueeze(0).repeat(3, 1, 1).unsqueeze(0)
-
     # Permute image to CxHxW and add the batch dimension
     image: torch.Tensor = image.torch()
-    image = image.permute(2, 0, 1).unsqueeze(0)
-
-    return image, depth
+    return image.permute(2, 0, 1).unsqueeze(0)
