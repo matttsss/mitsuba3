@@ -18,9 +18,15 @@ class StableDiffusion:
         if enable_offload:
             self.pipe.enable_model_cpu_offload()
 
+    def set_min_max_steps(self, min_step_percent=0.02, max_step_percent=0.98):
+        self.min_step = int(self.num_train_timesteps * min_step_percent)
+        self.max_step = int(self.num_train_timesteps * max_step_percent)
 
     @torch.no_grad()
-    def prep_sd(self, prompt: str, negative_prompt: str, guidance_scale: float, cn_cond_scale: float, render_size: int):
+    def prep_sd(self, prompt: str, negative_prompt: str, 
+                guidance_scale: float, cn_cond_scale: float, 
+                render_size: int, nb_steps: int = 28) -> dict:
+        
         do_cfg = guidance_scale > 1.0
 
         (
@@ -44,6 +50,8 @@ class StableDiffusion:
             prompt_embeds = torch.cat([negative_prompt_embeds, prompt_embeds], dim=0)
             pooled_prompt_embeds = torch.cat([negative_pooled_prompt_embeds, pooled_prompt_embeds], dim=0)
 
+        self.pipe.scheduler.set_timesteps(nb_steps, device=self.device)
+
         # Returns the precomputed parameters as a dictionary
         return {
             'prompt_embeds': prompt_embeds,
@@ -52,7 +60,21 @@ class StableDiffusion:
             'render_size': render_size,
             'guidance_scale': guidance_scale,
             'do_cfg': do_cfg,
+            'min_steps': int(nb_steps * 0.02),
+            'max_steps': int(nb_steps * 0.98)
         }
+    
+    def get_sigmas(self,timesteps, n_dim=4, dtype=torch.float16):
+        sigmas = self.pipe.scheduler.sigmas.to(device=self.device, dtype=dtype)
+        schedule_timesteps = self.pipe.scheduler.timesteps.to(self.device)
+        timesteps = timesteps.to(self.device)
+        step_indices = [(schedule_timesteps == t).nonzero().item() for t in timesteps]
+
+        sigma = sigmas[step_indices].flatten()
+        while len(sigma.shape) < n_dim:
+            sigma = sigma.unsqueeze(-1)
+        return sigma
+
     
     @torch.no_grad()
     def predict_velocity(self, latents: torch.Tensor, depth: torch.Tensor, sd_config, timestep):

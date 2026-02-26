@@ -58,7 +58,7 @@ def get_depth(scene: mi.Scene, sensor: mi.Sensor) -> mi.TensorXf:
 
 #@dr.freeze
 def scene_step(scene: mi.Scene, scene_params: mi.SceneParameters,
-               sd: StableDiffusion, sd_config: dict, debug_folder: str = "") -> torch.Tensor:
+               sd: StableDiffusion, sd_config: dict) -> tuple[mi.TensorXf, torch.Tensor]:
 
     # TODO fixme
     # @dr.wrap(source=torch, target=dr)
@@ -67,17 +67,14 @@ def scene_step(scene: mi.Scene, scene_params: mi.SceneParameters,
     
     # image = wraper(scene, scene_params)
 
+    # Render depth and image
     dr_depth = get_depth(scene, sensor=scene.sensors()[0])
     dr_image = mi.render(scene, params=scene_params)
-    
-    if debug_folder != "":
-        mi.util.write_bitmap(debug_folder + "dragon_depth.png", dr_depth)
-        mi.util.write_bitmap(debug_folder + "dragon_rgb.png", dr_image)
+    dr_image = dr_image / dr.maximum(dr.max(dr_image), 1)
 
+    # Convert to torch tensors
     image: torch.Tensor = dr_image.torch()
     depth: torch.Tensor = dr_depth.torch()
-
-    # Correct shapes
     image = image.permute(2, 0, 1).unsqueeze(0)
     depth = depth.unsqueeze(0).repeat(3, 1, 1).unsqueeze(0)
 
@@ -86,25 +83,42 @@ def scene_step(scene: mi.Scene, scene_params: mi.SceneParameters,
     latent_img = sd.encode_image(image)
 
     noise = torch.randn_like(latent_img, generator=sd.generator, device=sd.device)
-    timestep = torch.rand(1, generator=sd.generator, device=sd.device)
+    indices = torch.randint(sd_config["min_steps"], sd_config["max_steps"] + 1, (1,), 
+                            generator=sd.generator, device=sd.device)
+    timesteps = sd.pipe.scheduler.timesteps[indices].to(device=sd.device)
 
-    noisy_latents = (1 - timestep) * latent_img + timestep * noise
+    # Add noise according to flow matching.
+    sigmas = sd.get_sigmas(timesteps, n_dim=1, dtype=latent_img.dtype)
+    latents_noisy = sigmas * noise + (1.0 - sigmas) * latent_img
+                # pred noise
     velocity = sd.predict_velocity(
-        noisy_latents, depth, sd_config, timestep
+        latents_noisy, depth, sd_config, timesteps
     )
-    
-    u = torch.randn(size=(1,), generator=sd.generator, device=sd.device)
+    u = torch.normal(mean=0, std=1, size=(1,), device=sd.device)
     weighting = torch.nn.functional.sigmoid(u)
 
-    grad = torch.nan_to_num(velocity)
+    # Compute noisy latents and associated velocity
+    # noise = torch.randn_like(latent_img, generator=sd.generator, device=sd.device)
+    # timestep = torch.rand(1, generator=sd.generator, device=sd.device) / 0.6
 
-    target = grad.detach()
+    # noisy_latents = (1 - timestep) * latent_img + timestep * noise
+    # velocity = sd.predict_velocity(
+    #     noisy_latents, depth, sd_config, timestep
+    # )
+    
+    # u = torch.randn(size=(1,), generator=sd.generator, device=sd.device)
+    # weighting = torch.nn.functional.sigmoid(u)
+
+    velocity = torch.nan_to_num(velocity)
+
+    target = velocity.detach()
     loss_rfds = weighting * torch.nn.functional.mse_loss(noise - latent_img, target, reduction="mean") / 1 # batch_size
     loss_rdfs = loss_rfds.mean()
 
+    # Backpropagate gradients
     loss_rdfs.backward()
 
     dr.set_grad(dr_image, image.grad.squeeze(0).permute(1, 2, 0))
+    
     dr.backward(dr_image)
-
-    return loss_rdfs.item()
+    return dr_image, loss_rdfs.item()

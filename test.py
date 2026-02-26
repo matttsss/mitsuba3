@@ -10,11 +10,11 @@ from renderer import get_depth, randomize_sensor, scene_step
 mi.set_variant('cuda_ad_rgb')
 
 # Parameters
+camera_to_world_key = 'sensor.to_world'
 render_size = 1024
-prompt="Blue dragon on a piedestal, highly detailed, cinematic lighting, 4k, photorealistic"
+prompt="Blue dragon on a piedestal, highly detailed, directional sunlight, 4k, photorealistic, black background"
 negative_prompt="" #change geometry, change shape, change pose, change structure
-num_inference_steps=28
-guidance_scale=7.5
+guidance_scale=10
 num_images_per_prompt=1
 cn_cond_scale=0.6
 
@@ -25,22 +25,40 @@ pt_generator = torch.Generator(device=device).manual_seed(seed)
 dr_generator = dr.rng(seed=seed)
 
 sd = StableDiffusion(device=device, generator=pt_generator, enable_offload=True)
+sd_config = sd.prep_sd(
+    prompt=prompt, negative_prompt=negative_prompt, guidance_scale=guidance_scale, 
+    cn_cond_scale=cn_cond_scale, render_size=render_size
+)
+    
 scene, scene_params = load_scene(render_size)
 
+
 if True:
-
-    sd_config = sd.prep_sd(
-        prompt=prompt, negative_prompt=negative_prompt, guidance_scale=guidance_scale, 
-        cn_cond_scale=cn_cond_scale, render_size=render_size
-    )
-    
-    scene_step(scene, scene_params, sd, sd_config, debug_folder="outputs/")
+    scene_params.keep([r'.*\.reflectance\.data', camera_to_world_key])
+    opt = mi.ad.Adam(lr=5e-3, params = {
+        k:v for k, v in scene_params.items() if camera_to_world_key not in k
+    })
+    scene_params.update(opt)
 
 
-    for key in scene_params.keys():
-        if ".bsdf.reflectance.data" in key:
-            obj_name = key.split(".")[0]
-            mi.util.write_bitmap(f'outputs/dragon_{obj_name}_grad.png', scene_params[key].grad)
+    for i in range(500):
+        randomize_sensor(dr_generator, scene_params, sensor_to_world_key=camera_to_world_key, target=[0, 7, 0], radius=60)
+        image, loss = scene_step(scene, scene_params, sd, sd_config)
+
+        opt.step()
+        for k, v in opt.items():
+            opt[k] = dr.clip(opt[k], 0, 1)
+
+        scene_params.update(opt)
+
+        dr.print("Iteration {}: Mean: {}, Max: {}, Min: {}, Loss: {}", i, dr.mean(image), dr.max(image), dr.min(image), loss)
+
+        if i % 10 == 0:
+            mi.util.write_bitmap('outputs/dragon_opt.png', image)
+            for k, v in opt.items():
+                mi.util.write_bitmap(f'outputs/dragon_tex/{k.split(".")[0]}.png', opt[k])
+
+
 
 elif True:
     dr_depth = get_depth(scene, sensor=scene.sensors()[0])
@@ -53,7 +71,7 @@ elif True:
     image = sd.generate(
         prompt=prompt,
         negative_prompt=negative_prompt,
-        num_inference_steps=num_inference_steps,
+        num_inference_steps=28,
         guidance_scale=guidance_scale,
         cn_cond_scale=cn_cond_scale,
         depth=depth
@@ -77,7 +95,7 @@ else:
     images = pipe(
         prompt=prompt,
         negative_prompt=negative_prompt,
-        num_inference_steps=num_inference_steps,
+        num_inference_steps=28,
         guidance_scale=guidance_scale,
         num_images_per_prompt=num_images_per_prompt,
         controlnet_conditioning_scale=cn_cond_scale,

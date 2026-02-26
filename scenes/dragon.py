@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import drjit as dr
 import mitsuba as mi
 
 def load_scene(render_size: int = 1024) -> tuple[mi.Scene, mi.SceneParameters]:
@@ -10,12 +9,13 @@ def load_scene(render_size: int = 1024) -> tuple[mi.Scene, mi.SceneParameters]:
         'type': 'scene',
         'integrator': {
             'type': 'prb',
-            'max_depth': 8
+            'max_depth': 8,
+            'hide_emitters': True
         },
         # -------------------- Sensor --------------------
         'sensor': {
             'type': 'perspective',
-            'fov': 20,
+            'fov': 30,
             'to_world': T().look_at(
                 origin=[-40, 5, 50],
                 target=[0, 10, 0],
@@ -39,62 +39,74 @@ def load_scene(render_size: int = 1024) -> tuple[mi.Scene, mi.SceneParameters]:
         # -------------------- Light --------------------
         'light': {
             'type': 'directional',
-            'direction': mi.ScalarVector3f(0.1886, -0.6923, -0.6965),
+            'direction': mi.ScalarVector3f(-0.6965, -0.6923, 0.1886),
             'irradiance': 10.0
+        },
+        'background': {
+            'type': 'constant',
+            'radiance': {
+                'type': 'rgb',
+                'value': [0.2, 0.2, 0.2]
+            }
         },
         # -------------------- Shapes --------------------
         'dragon': {
-            'type': 'obj',
-            'filename': 'resources/dragon/dragon.obj',
+            'type': 'ply',
+            'filename': 'resources/dragon/dragon.ply',
             'bsdf': {
                 'type': 'diffuse',
                 'reflectance': {
                     'type': 'bitmap',
-                    'filename': 'resources/dragon/white.jpg'
+                    'filename': 'resources/dragon/blue_tex.png',
+                    'format': 'variant'
                 }
             }
         },
         'base': {
-            'type': 'obj',
-            'filename': 'resources/dragon/base.obj',
+            'type': 'ply',
+            'filename': 'resources/dragon/base.ply',
             'bsdf': {
                 'type': 'diffuse',
                 'reflectance': {
                     'type': 'bitmap',
-                    'filename': 'resources/dragon/white.jpg'
+                    'filename': 'resources/dragon/grey_tex.png',
+                    'format': 'variant'
                 }
             }
         },
         'bigstone': {
-            'type': 'obj',
-            'filename': 'resources/dragon/bigstone.obj',
+            'type': 'ply',
+            'filename': 'resources/dragon/bigstone.ply',
             'bsdf': {
                 'type': 'diffuse',
                 'reflectance': {
                     'type': 'bitmap',
-                    'filename': 'resources/dragon/white.jpg'
+                    'filename': 'resources/dragon/grey_tex.png',
+                    'format': 'variant'
                 }
             }
         },
         'smallstone': {
-            'type': 'obj',
-            'filename': 'resources/dragon/smallstone.obj',
+            'type': 'ply',
+            'filename': 'resources/dragon/smallstone.ply',
             'bsdf': {
                 'type': 'diffuse',
                 'reflectance': {
                     'type': 'bitmap',
-                    'filename': 'resources/dragon/white.jpg'
+                    'filename': 'resources/dragon/grey_tex.png',
+                    'format': 'variant'
                 }
             }
         },
         'sword': {
-            'type': 'obj',
-            'filename': 'resources/dragon/sword.obj',
+            'type': 'ply',
+            'filename': 'resources/dragon/sword.ply',
             'bsdf': {
                 'type': 'diffuse',
                 'reflectance': {
                     'type': 'bitmap',
-                    'filename': 'resources/dragon/white.jpg'
+                    'filename': 'resources/dragon/grey_tex.png',
+                    'format': 'variant'
                 }
             }
         }
@@ -102,10 +114,4 @@ def load_scene(render_size: int = 1024) -> tuple[mi.Scene, mi.SceneParameters]:
 
     scene = mi.load_dict(scene_dict, optimize=False)
     scene_params = mi.traverse(scene)
-
-    for key in scene_params.keys():
-        if ".bsdf.reflectance.data" in key:
-            dr.enable_grad(scene_params[key])
-
-    scene_params.update()
     return scene, scene_params
