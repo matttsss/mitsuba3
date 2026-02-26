@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import drjit as dr
 import mitsuba as mi
 
 def load_scene(render_size: int = 1024) -> tuple[mi.Scene, mi.SceneParameters]:
@@ -8,7 +9,7 @@ def load_scene(render_size: int = 1024) -> tuple[mi.Scene, mi.SceneParameters]:
     scene_dict = {
         'type': 'scene',
         'integrator': {
-            'type': 'path',
+            'type': 'prb',
             'max_depth': 8
         },
         # -------------------- Sensor --------------------
@@ -101,4 +102,10 @@ def load_scene(render_size: int = 1024) -> tuple[mi.Scene, mi.SceneParameters]:
 
     scene = mi.load_dict(scene_dict, optimize=False)
     scene_params = mi.traverse(scene)
+
+    for key in scene_params.keys():
+        if ".bsdf.reflectance.data" in key:
+            dr.enable_grad(scene_params[key])
+
+    scene_params.update()
     return scene, scene_params

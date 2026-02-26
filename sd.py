@@ -20,7 +20,7 @@ class StableDiffusion:
 
 
     @torch.no_grad()
-    def encode_prompt(self, prompt: str, negative_prompt: str, guidance_scale: float):
+    def prep_sd(self, prompt: str, negative_prompt: str, guidance_scale: float, cn_cond_scale: float, render_size: int):
         do_cfg = guidance_scale > 1.0
 
         (
@@ -48,22 +48,28 @@ class StableDiffusion:
         return {
             'prompt_embeds': prompt_embeds,
             'pooled_prompt_embeds': pooled_prompt_embeds,
+            'cn_cond_scale': cn_cond_scale,
+            'render_size': render_size,
+            'guidance_scale': guidance_scale,
             'do_cfg': do_cfg,
         }
     
-    def predict_velocity(self, latents: torch.Tensor, depth: torch.Tensor, prompt_embeddings, timestep, controlnet_conditioning_scale):
+    @torch.no_grad()
+    def predict_velocity(self, latents: torch.Tensor, depth: torch.Tensor, sd_config, timestep):
         device = self.device
         dtype = self.pipe.transformer.dtype
 
-        prompt_embeds = prompt_embeddings['prompt_embeds']
-        pooled_prompt_embeds = prompt_embeddings['pooled_prompt_embeds']
-        do_cfg = prompt_embeddings['do_cfg']
+        latents = latents.to(device=device, dtype=dtype)
+        depth = depth.to(device=device, dtype=dtype)
+
+        prompt_embeds = sd_config['prompt_embeds']
+        pooled_prompt_embeds = sd_config['pooled_prompt_embeds']
+        do_cfg = sd_config['do_cfg']
 
         # Prepare depth image as controlnet conditioning (encoded to latent space)
         controlnet_config = self.pipe.controlnet.config
         vae_shift_factor = 0 if controlnet_config.force_zeros_for_pooled_projection else self.pipe.vae.config.shift_factor
 
-        depth = depth.to(device=device, dtype=dtype)
         control_image = self.pipe.prepare_image(
                 image=depth,
                 width=depth.shape[-1],
@@ -101,7 +107,7 @@ class StableDiffusion:
             pooled_projections=controlnet_pooled_projections,
             joint_attention_kwargs=None,
             controlnet_cond=control_image,
-            conditioning_scale=controlnet_conditioning_scale,
+            conditioning_scale=sd_config['cn_cond_scale'],
             return_dict=False,
         )[0]
 
@@ -119,22 +125,22 @@ class StableDiffusion:
         # Classifier-free guidance
         if do_cfg:
             velocity_pred_uncond, velocity_pred_text = velocity_pred.chunk(2)
-            velocity_pred = velocity_pred_uncond + 7.5 * (velocity_pred_text - velocity_pred_uncond)
+            velocity_pred = velocity_pred_uncond + sd_config['guidance_scale'] * (velocity_pred_text - velocity_pred_uncond)
 
         return velocity_pred
 
     @torch.no_grad()
     def generate(self, prompt: str, negative_prompt: str, guidance_scale: float, 
-                       num_inference_steps: int, controlnet_conditioning_scale: float, depth: torch.Tensor):
+                       num_inference_steps: int, cn_cond_scale: float, depth: torch.Tensor):
         
-        prompt_embeddings = self.encode_prompt(prompt, negative_prompt, guidance_scale)
+        sd_config = self.prep_sd(prompt, negative_prompt, guidance_scale, cn_cond_scale, depth.shape[-1])
         
         self.pipe.scheduler.set_timesteps(num_inference_steps, device=self.device)
         timesteps = self.pipe.scheduler.timesteps
 
         latents = self.prepare_latents(depth.shape[-1])
         for t in timesteps:
-            velocity_pred = self.predict_velocity(latents, depth, prompt_embeddings, t, controlnet_conditioning_scale)
+            velocity_pred = self.predict_velocity(latents, depth, sd_config, t)
             latents = self.pipe.scheduler.step(velocity_pred, t, latents, return_dict=False)[0]
 
         image = self.decode_latents(latents)
@@ -155,9 +161,14 @@ class StableDiffusion:
         )
     
     def decode_latents(self, latents):
+        latents = latents.to(device=self.device, dtype=self.pipe.vae.dtype)
+
         latents = (latents / self.pipe.vae.config.scaling_factor) + self.pipe.vae.config.shift_factor
         return self.pipe.vae.decode(latents, return_dict=False)[0]
     
-    def encode_image(self, image, vae_shift_factor):
+    def encode_image(self, image, vae_shift_factor=None):
+        image = image.to(device=self.device, dtype=self.pipe.vae.dtype)
+
+        vae_shift_factor = vae_shift_factor or self.pipe.vae.config.shift_factor
         image = self.pipe.vae.encode(image).latent_dist.sample(generator=self.generator)
         return (image - vae_shift_factor) * self.pipe.vae.config.scaling_factor
