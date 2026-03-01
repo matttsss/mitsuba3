@@ -113,6 +113,13 @@ def load_scene(render_size: int = 1024) -> tuple[mi.Scene, mi.SceneParameters]:
         }
     }
 
+    view_params = {
+        'scene_name': 'dragon',
+        'prompt': "A photo of a blue dragon statue on a piedestal, with a sword in its claws and two stones on the sides, under a directional light",
+        'target': mi.ScalarVector3f(0, 7, 0),
+        'radius': 60,
+    }
+
     scene = mi.load_dict(scene_dict, optimize=False)
     scene_params = mi.traverse(scene)
-    return scene, scene_params
+    return scene, scene_params, view_params
