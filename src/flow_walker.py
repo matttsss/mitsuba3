@@ -5,46 +5,11 @@ import mitsuba as mi
 
 from renderer import get_depth
 from scenes.dragon import load_scene
+from utils import save_latents_as_image, get_index_for_timestep, hdr_to_sdr
 
 from sd import StableDiffusion
 
 mi.set_variant('cuda_ad_rgb')
-
-
-def save_latents_as_image(sd: StableDiffusion, latents, filename):
-    image = sd.decode_latents(latents)
-    image = sd.pipe.image_processor.postprocess(image, output_type='pt', do_denormalize=[False])
-    image = image.squeeze(0).permute(1, 2, 0)
-    mi.util.write_bitmap(filename, image)
-
-
-def get_index_for_timestep(timesteps, t):
-    for i, timestep in enumerate(timesteps):
-        if timestep <= t:
-            return i
-    return len(timesteps) - 1
-
-
-def hdr_to_sdr(img, exposure=1.0):
-    # 1. Apply exposure
-    img = img * exposure
-    
-    # 2. Tone mapping (ACES)
-    a, b, c, d, e = 2.51, 0.03, 2.43, 0.59, 0.14
-    img = (img*(a*img+b)) / (img*(c*img+d)+e)
-    
-    # 3. Clamp
-    img = torch.clamp(img, 0, 1)
-    
-    # 4. Gamma correction
-    img = torch.where(
-        img <= 0.0031308,
-        12.92 * img,
-        1.055 * torch.pow(img, 1/2.4) - 0.055
-    )
-    
-    return img
-
 
 with torch.no_grad():
     scene, scene_params = load_scene(render_size=1024)
@@ -59,7 +24,7 @@ with torch.no_grad():
     mi.util.write_bitmap('outputs/dragon_rendered.exr', image)
     image = image.permute(2, 0, 1).unsqueeze(0)
 
-    t = 0.1
+    t = 0.3
     nb_steps = 100
 
     latent_img = sd.encode_image(image)

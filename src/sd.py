@@ -168,10 +168,13 @@ class StableDiffusion:
         latents = latents.to(device=self.device, dtype=self.pipe.vae.dtype)
 
         latents = (latents / self.pipe.vae.config.scaling_factor) + self.pipe.vae.config.shift_factor
-        return self.pipe.vae.decode(latents, return_dict=False)[0]
+        image = self.pipe.vae.decode(latents).sample
+
+        return self.pipe.image_processor.postprocess(image, output_type='pt')
     
     def encode_image(self, image, vae_shift_factor=None):
         image = image.to(device=self.device, dtype=self.pipe.vae.dtype)
+        image = self.pipe.image_processor.preprocess(image)
 
         vae_shift_factor = vae_shift_factor or self.pipe.vae.config.shift_factor
         image = self.pipe.vae.encode(image).latent_dist.sample(generator=self.generator)

@@ -12,7 +12,7 @@ mi.set_variant('cuda_ad_rgb')
 # Parameters
 camera_to_world_key = 'sensor.to_world'
 render_size = 1024
-prompt="Blue dragon on a piedestal, highly detailed, directional sunlight, 4k, photorealistic, grassy hills background"
+prompt="Blue dragon on a piedestal"
 negative_prompt="" #change geometry, change shape, change pose, change structure
 guidance_scale=10
 num_images_per_prompt=1
@@ -27,7 +27,7 @@ dr_generator = dr.rng(seed=seed)
 sd = StableDiffusion(device=device, generator=pt_generator, enable_offload=True)
 sd_config = sd.prep_sd(
     prompt=prompt, negative_prompt=negative_prompt, guidance_scale=guidance_scale, 
-    cn_cond_scale=cn_cond_scale, render_size=render_size, min_time=0.02, max_time=0.25
+    cn_cond_scale=cn_cond_scale, render_size=render_size, min_time=0.02, max_time=0.98
 )
 
 scene, scene_params = load_scene(render_size)

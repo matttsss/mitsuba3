@@ -5,6 +5,7 @@ import torch
 import drjit as dr
 import mitsuba as mi
 
+from utils import hdr_to_sdr
 from sd import StableDiffusion
 
 def randomize_sensor(generator: dr.random.Generator, scene_params: mi.SceneParameters, 
@@ -60,17 +61,9 @@ def get_depth(scene: mi.Scene, sensor: mi.Sensor) -> mi.TensorXf:
 def scene_step(scene: mi.Scene, scene_params: mi.SceneParameters,
                sd: StableDiffusion, sd_config: dict) -> tuple[mi.TensorXf, torch.Tensor]:
 
-    # TODO fixme
-    # @dr.wrap(source=torch, target=dr)
-    # def wraper(scene, scene_params) -> torch.Tensor:
-    #     return mi.render(scene, params=scene_params)
-    
-    # image = wraper(scene, scene_params)
-
     # Render depth and image
     dr_depth = get_depth(scene, sensor=scene.sensors()[0])
     dr_image = mi.render(scene, params=scene_params)
-    dr_image = dr.clip(dr_image, 0, 1) # / dr.maximum(dr.max(dr_image), 1)
 
     # Convert to torch tensors
     image: torch.Tensor = dr_image.torch()
@@ -80,18 +73,22 @@ def scene_step(scene: mi.Scene, scene_params: mi.SceneParameters,
 
     # Stich gradients
     image.requires_grad_(dr.grad_enabled(dr_image))
-    latent_img = sd.encode_image(image)
+    latent_img = sd.encode_image(hdr_to_sdr(image))
 
     noise = torch.randn_like(latent_img, generator=sd.generator, device=sd.device)
     time = torch.rand(1, generator=sd.generator, device=sd.device) * (sd_config['max_time'] - sd_config['min_time']) + sd_config['min_time']
 
     latents_noisy = time * noise + (1.0 - time) * latent_img
-    velocity = sd.predict_velocity(
+    target_vel = sd.predict_velocity(
         latents_noisy, depth, sd_config, time * 1000
     )
-    velocity = torch.nan_to_num(velocity)
-    target = velocity.detach()
-    loss_rfds = 2 * (1 + time) * torch.nn.functional.mse_loss(noise - latent_img, target, reduction="mean") / 1 # batch_size
+    target_vel = torch.nan_to_num(target_vel)
+    target_vel = target_vel.detach()
+
+    u = torch.normal(mean=0, std=1, size=(1,), device=sd.device, generator=sd.generator)
+    weighting = torch.nn.functional.sigmoid(u)
+
+    loss_rfds = weighting * torch.nn.functional.mse_loss(noise - latent_img, target_vel, reduction="mean") / 1 # batch_size
     loss_rdfs = loss_rfds.mean()
 
     # Backpropagate gradients

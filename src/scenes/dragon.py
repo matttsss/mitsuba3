@@ -10,7 +10,7 @@ def load_scene(render_size: int = 1024) -> tuple[mi.Scene, mi.SceneParameters]:
         'integrator': {
             'type': 'prb',
             'max_depth': 8,
-            #'hide_emitters': True
+            'hide_emitters': True
         },
         # -------------------- Sensor --------------------
         'sensor': {
@@ -42,9 +42,13 @@ def load_scene(render_size: int = 1024) -> tuple[mi.Scene, mi.SceneParameters]:
             'direction': mi.ScalarVector3f(-0.6965, -0.6923, 0.1886),
             'irradiance': 10.0
         },
+        # 'background': {
+        #     'type': 'envmap',
+        #     'filename': 'resources/dragon/envmap.exr',
+        # },
         'background': {
-            'type': 'envmap',
-            'filename': 'resources/dragon/envmap.exr',
+            'type': 'constant',
+            'radiance': 0.1
         },
         # -------------------- Shapes --------------------
         'dragon': {
