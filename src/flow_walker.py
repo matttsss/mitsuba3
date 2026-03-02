@@ -12,7 +12,7 @@ from sd import StableDiffusion
 mi.set_variant('cuda_ad_rgb')
 
 with torch.no_grad():
-    scene, scene_params = load_scene(render_size=1024)
+    scene, scene_params, scene_metadata = load_scene(render_size=1024)
     sd = StableDiffusion(device='cuda', enable_offload=True)
     sd_config = sd.prep_sd("", "", 1.0, 0.5, 1024)
 

@@ -82,20 +82,7 @@ class StableDiffusion:
         # Prepare depth image as controlnet conditioning (encoded to latent space)
         controlnet_config = self.pipe.controlnet.config
         vae_shift_factor = 0 if controlnet_config.force_zeros_for_pooled_projection else self.pipe.vae.config.shift_factor
-
-        control_image = self.pipe.prepare_image(
-                image=depth,
-                width=depth.shape[-1],
-                height=depth.shape[-2],
-                batch_size=1,
-                num_images_per_prompt=1,
-                device=device,
-                dtype=dtype,
-                do_classifier_free_guidance=do_cfg,
-                guess_mode=False,
-            )
-        
-        control_image = self.encode_image(control_image, vae_shift_factor)
+        control_image = self.encode_image(depth, vae_shift_factor)
  
         # Expand inputs along batch dimension for classifier-free guidance
         latent_model_input = torch.cat([latents] * 2) if do_cfg else latents
@@ -156,10 +143,7 @@ class StableDiffusion:
             velocity_pred = self.predict_velocity(latents, depth, sd_config, t)
             latents = self.pipe.scheduler.step(velocity_pred, t, latents, return_dict=False)[0]
 
-        image = self.decode_latents(latents)
-        image = self.pipe.image_processor.postprocess(image, output_type='pt')
-
-        return image
+        return self.decode_latents(latents)
     
 
     def prepare_latents(self, render_size):
@@ -183,7 +167,7 @@ class StableDiffusion:
     
     def encode_image(self, image, vae_shift_factor=None):
         image = image.to(device=self.device, dtype=self.pipe.vae.dtype)
-        image = self.pipe.image_processor.preprocess(image)
+        image = self.pipe.image_processor.preprocess(image, width=512, height=512)
 
         vae_shift_factor = vae_shift_factor or self.pipe.vae.config.shift_factor
         image = self.pipe.vae.encode(image).latent_dist.sample(generator=self.generator)

@@ -121,7 +121,7 @@ def load_scene(render_size: int = 1024) -> tuple[mi.Scene, mi.SceneParameters]:
         'integrator': {
             'type': 'prb',
             'max_depth': 8,
-            #'hide_emitters': True
+            'hide_emitters': True
         },
         # -------------------- Sensor --------------------
         'sensor': {
@@ -166,10 +166,10 @@ def load_scene(render_size: int = 1024) -> tuple[mi.Scene, mi.SceneParameters]:
         #     0, -0.230128, -1.00592e-008, 0.0372435, 
         #     0, 0, 0, 1])),
 
-        # 'background': {
-        #     'type': 'constant',
-        #     'radiance': 0.1
-        # },
+        'background': {
+            'type': 'constant',
+            'radiance': 0.1
+        },
 
         'light': {
             'type': 'directional',
@@ -179,8 +179,8 @@ def load_scene(render_size: int = 1024) -> tuple[mi.Scene, mi.SceneParameters]:
 
         # -------------------- Shapes --------------------
         'background': {
-            'type': 'ply',
-            'filename': 'resources/coffee_maker/Background.ply',
+            'type': 'rectangle',
+            'to_world': mi.ScalarAffineTransform4f.rotate([1, 0, 0], 90).translate([0, -0.5, 0]).scale([10, 1, 10]),
             'bsdf': floor_bsdf
         },
         'rubber_feet': {
@@ -227,7 +227,7 @@ def load_scene(render_size: int = 1024) -> tuple[mi.Scene, mi.SceneParameters]:
         'scene_name': 'coffee_maker',
         'prompt': "A photo of a coffee maker, with a yellow casing, metal pipes and support, a glass bowl, and black rubber feet",
         'target': mi.ScalarVector3f(0, 0.2, 0),
-        'radius': 0.7
+        'radius': 1
     }
 
     return scene, scene_params, scene_metadata

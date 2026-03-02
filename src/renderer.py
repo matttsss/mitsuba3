@@ -5,7 +5,6 @@ import torch
 import drjit as dr
 import mitsuba as mi
 
-from utils import hdr_to_sdr
 from sd import StableDiffusion
 
 def randomize_sensor(scene_params: mi.SceneParameters, sensor_to_world_key: str, 
@@ -60,7 +59,6 @@ def get_depth(scene: mi.Scene, sensor: mi.Sensor) -> mi.TensorXf:
         return mi.TensorXf(depth, shape=(film_size[1], film_size[0]))
 
 
-#@dr.freeze
 def scene_step(scene: mi.Scene, scene_params: mi.SceneParameters,
                sd: StableDiffusion, sd_config: dict) -> tuple[mi.TensorXf, torch.Tensor]:
 
@@ -76,28 +74,25 @@ def scene_step(scene: mi.Scene, scene_params: mi.SceneParameters,
 
     # Stich gradients
     image.requires_grad_(dr.grad_enabled(dr_image))
-    latent_img = sd.encode_image(hdr_to_sdr(image))
+    latent_img = sd.encode_image(image)
 
     noise = torch.randn_like(latent_img, generator=sd.generator, device=sd.device)
     time = torch.rand(1, generator=sd.generator, device=sd.device) * (sd_config['max_time'] - sd_config['min_time']) + sd_config['min_time']
 
     latents_noisy = time * noise + (1.0 - time) * latent_img
     target_vel = sd.predict_velocity(
-        latents_noisy, depth, sd_config, time * 1000
+        latents_noisy, depth, sd_config, time * sd.pipe.scheduler.config.num_train_timesteps
     )
     target_vel = torch.nan_to_num(target_vel)
     target_vel = target_vel.detach()
 
-    u = torch.normal(mean=0, std=1, size=(1,), device=sd.device, generator=sd.generator)
-    weighting = torch.nn.functional.sigmoid(u)
-
-    loss_rfds = weighting * torch.nn.functional.mse_loss(noise - latent_img, target_vel, reduction="mean") / 1 # batch_size
+    loss_rfds = torch.nn.functional.mse_loss(noise - latent_img, target_vel, reduction="mean")
     loss_rdfs = loss_rfds.mean()
 
     # Backpropagate gradients
     loss_rdfs.backward()
 
-    dr.set_grad(dr_image, image.grad.squeeze(0).permute(1, 2, 0))
+    dr.set_grad(dr_image, mi.TensorXf(image.grad.squeeze(0).permute(1, 2, 0)))
     
     dr.backward(dr_image)
     return dr_image, loss_rdfs.item()
