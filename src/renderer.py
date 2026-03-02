@@ -8,20 +8,23 @@ import mitsuba as mi
 from utils import hdr_to_sdr
 from sd import StableDiffusion
 
-def randomize_sensor(generator: dr.random.Generator, scene_params: mi.SceneParameters, 
-                     sensor_to_world_key: str, target: mi.ScalarVector3f = [0, 10, 0], radius: float = 50) -> None:
-    # Sample a random azimuth uniformly
-    phi = generator.random(mi.ScalarFloat, 1) * dr.two_pi
-    # Sample near the horizon
-    theta = generator.normal(mi.ScalarFloat, 1) * dr.inv_two_pi + dr.pi / 2
+def randomize_sensor(scene_params: mi.SceneParameters, sensor_to_world_key: str, 
+                     sensor_idx: int, sensor_count: int, 
+                     target: mi.ScalarVector3f = [0, 10, 0], radius: float = 50) -> None:
 
-    st, ct = dr.sincos(theta)
-    sp, cp = dr.sincos(phi)
-    offset = mi.ScalarVector3f(st * sp, ct, -cp * st)
+    golden_ratio = (1 + 5**0.5)/2
+    phi = 2 * dr.pi * sensor_idx / golden_ratio
+    theta = dr.acos(1 - 2*(sensor_idx+0.5)/sensor_count)
+
+    offset = mi.ScalarVector3f(
+        dr.sin(phi) * dr.sin(theta),
+        dr.abs(dr.cos(theta)),
+        -dr.cos(phi) * dr.sin(theta),
+    )
 
     origin = target + offset * radius
 
-    scene_params[sensor_to_world_key] = mi.Transform4f.look_at(origin=origin, target=target, up=mi.ScalarVector3f(0, 1, 0))
+    scene_params[sensor_to_world_key] = mi.ScalarTransform4f.look_at(origin=origin, target=target, up=[0, 1, 0])
     scene_params.update()
 
 @dr.freeze

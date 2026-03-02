@@ -18,6 +18,15 @@ class StableDiffusion:
         if enable_offload:
             self.pipe.enable_model_cpu_offload()
 
+        for param in self.pipe.vae.parameters():
+            param.requires_grad_(False)
+
+        for param in self.pipe.controlnet.parameters():
+            param.requires_grad_(False)
+
+        for param in self.pipe.transformer.parameters():
+            param.requires_grad_(False)
+
     @torch.no_grad()
     def prep_sd(self, prompt: str, negative_prompt: str, 
                 guidance_scale: float, cn_cond_scale: float, 
