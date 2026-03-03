@@ -1,4 +1,6 @@
 import torch
+import drjit as dr
+
 from diffusers import StableDiffusion3ControlNetPipeline
 from diffusers.models import SD3ControlNetModel
 
@@ -128,6 +130,26 @@ class StableDiffusion:
             velocity_pred = velocity_pred_uncond + sd_config['guidance_scale'] * (velocity_pred_text - velocity_pred_uncond)
 
         return velocity_pred
+
+    @dr.wrap(source='drjit', target='torch')
+    def compute_rdfs_loss(self, image: torch.FloatTensor, depth: torch.FloatTensor, sd_config):
+        image = image.unsqueeze(0).permute(0, 3, 1, 2)  # Convert to (1, C, H, W)
+        depth = depth.detach().unsqueeze(0).repeat(3, 1, 1).unsqueeze(0)  # Convert to (1, 3, H, W)
+
+        latents = self.encode_image(image).float()
+
+        time = torch.rand(1, generator=self.generator, device=self.device) * (sd_config['max_time'] - sd_config['min_time']) + sd_config['min_time']
+        noise = torch.randn_like(latents, generator=self.generator, device=self.device)
+        latents_noisy = time * noise + (1.0 - time) * latents
+
+        predicted_vel = self.predict_velocity(
+            latents_noisy, depth, sd_config, timestep=time * self.pipe.scheduler.config.num_train_timesteps
+        )
+        predicted_vel = torch.nan_to_num(predicted_vel).float()  # Cast to float32 for loss computation
+
+        loss_rfds = torch.nn.functional.mse_loss(noise - latents, predicted_vel, reduction="mean")
+        loss_rdfs = loss_rfds.mean()
+        return loss_rdfs
 
     @torch.no_grad()
     def generate(self, prompt: str, negative_prompt: str, guidance_scale: float, 

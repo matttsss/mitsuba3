@@ -1,11 +1,7 @@
 from __future__ import annotations
 
-import torch
-
 import drjit as dr
 import mitsuba as mi
-
-from sd import StableDiffusion
 
 def randomize_sensor(scene_params: mi.SceneParameters, sensor_to_world_key: str, 
                      sensor_idx: int, sensor_count: int, 
@@ -57,42 +53,3 @@ def get_depth(scene: mi.Scene, sensor: mi.Sensor) -> mi.TensorXf:
         depth = dr.select(depth == 0, 0, 1 - depth)
 
         return mi.TensorXf(depth, shape=(film_size[1], film_size[0]))
-
-
-def scene_step(scene: mi.Scene, scene_params: mi.SceneParameters,
-               sd: StableDiffusion, sd_config: dict) -> tuple[mi.TensorXf, torch.Tensor]:
-
-    # Render depth and image
-    dr_depth = get_depth(scene, sensor=scene.sensors()[0])
-    dr_image = mi.render(scene, params=scene_params)
-
-    # Convert to torch tensors
-    image: torch.Tensor = dr_image.torch()
-    depth: torch.Tensor = dr_depth.torch()
-    image = image.permute(2, 0, 1).unsqueeze(0)
-    depth = depth.unsqueeze(0).repeat(3, 1, 1).unsqueeze(0)
-
-    # Stich gradients
-    image.requires_grad_(dr.grad_enabled(dr_image))
-    latent_img = sd.encode_image(image)
-
-    noise = torch.randn_like(latent_img, generator=sd.generator, device=sd.device)
-    time = torch.rand(1, generator=sd.generator, device=sd.device) * (sd_config['max_time'] - sd_config['min_time']) + sd_config['min_time']
-
-    latents_noisy = time * noise + (1.0 - time) * latent_img
-    target_vel = sd.predict_velocity(
-        latents_noisy, depth, sd_config, time * sd.pipe.scheduler.config.num_train_timesteps
-    )
-    target_vel = torch.nan_to_num(target_vel)
-    target_vel = target_vel.detach()
-
-    loss_rfds = torch.nn.functional.mse_loss(noise - latent_img, target_vel, reduction="mean")
-    loss_rdfs = loss_rfds.mean()
-
-    # Backpropagate gradients
-    loss_rdfs.backward()
-
-    dr.set_grad(dr_image, mi.TensorXf(image.grad.squeeze(0).permute(1, 2, 0)))
-    
-    dr.backward(dr_image)
-    return dr_image, loss_rdfs.item()

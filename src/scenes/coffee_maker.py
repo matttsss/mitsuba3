@@ -225,7 +225,7 @@ def load_scene(render_size: int = 1024) -> tuple[mi.Scene, mi.SceneParameters]:
 
     scene_metadata = {
         'scene_name': 'coffee_maker',
-        'prompt': "A photo of a coffee maker, with a yellow casing, metal pipes and support, a glass bowl, and black rubber feet",
+        'prompt': "A photo of a coffee maker, with a yellow casing, metal pipes and support, a glass bowl",
         'target': mi.ScalarVector3f(0, 0.2, 0),
         'radius': 1
     }
