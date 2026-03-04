@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import mitsuba as mi
+from sd import SDConfig
 
 
 def list_to_mat4f(lst: list[float]) -> mi.ScalarTransform4f:
@@ -28,7 +29,7 @@ def get_light(to_world: mi.ScalarTransform4f) -> dict:
         'to_world': to_world
     }
 
-def load_scene(render_size: int = 1024) -> tuple[mi.Scene, mi.SceneParameters]:
+def load_scene(render_size: int = 1024) -> tuple[mi.Scene, mi.SceneParameters, dict, SDConfig]:
     T = mi.ScalarTransform4f
 
     glass_bsdf = {
@@ -223,11 +224,21 @@ def load_scene(render_size: int = 1024) -> tuple[mi.Scene, mi.SceneParameters]:
     scene = mi.load_dict(scene_dict, optimize=False)
     scene_params = mi.traverse(scene)
 
+    sd_config = SDConfig(
+        prompt="A photo of a coffee maker, with a yellow casing, metal pipes and support, a glass bowl",
+        negative_prompt="",
+        cn_cond_scale=0.6,
+        render_size=render_size,
+        guidance_scale=50.0,
+        min_time=0.02,
+        max_time=0.98
+    )
+
     scene_metadata = {
         'scene_name': 'coffee_maker',
-        'prompt': "A photo of a coffee maker, with a yellow casing, metal pipes and support, a glass bowl",
+        'is_2d': False,
         'target': mi.ScalarVector3f(0, 0.2, 0),
         'radius': 1
     }
 
-    return scene, scene_params, scene_metadata
+    return scene, scene_params, scene_metadata, sd_config

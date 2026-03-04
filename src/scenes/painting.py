@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import mitsuba as mi
+from sd import SDConfig
 
-def load_scene(render_size: int = 1024) -> tuple[mi.Scene, mi.SceneParameters, dict]:
+def load_scene(render_size: int = 1024) -> tuple[mi.Scene, mi.SceneParameters, dict, SDConfig]:
     T = mi.ScalarTransform4f
 
     scene_dict = {
@@ -67,11 +68,19 @@ def load_scene(render_size: int = 1024) -> tuple[mi.Scene, mi.SceneParameters, d
     scene = mi.load_dict(scene_dict, optimize=True)
     scene_params = mi.traverse(scene)
 
+    sd_config = SDConfig(
+        prompt="A DSLR image of a hamburger",
+        negative_prompt="",
+        cn_cond_scale=0.0,
+        render_size=render_size,
+        guidance_scale=50.0,
+        min_time=0.02,
+        max_time=0.98
+    )
     scene_metadata = {
+        'is_2d': True,
         'scene_name': 'painting',
-        'prompt': "A photo of a coffee maker, with a yellow casing, metal pipes and support, a glass bowl, and black rubber feet",
-        'target': mi.ScalarVector3f(0, 0, 0),
-        'radius': 1
+        'render_size': render_size,
     }
 
-    return scene, scene_params, scene_metadata
+    return scene, scene_params, scene_metadata, sd_config

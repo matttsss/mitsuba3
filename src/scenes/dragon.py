@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import mitsuba as mi
+from sd import SDConfig
 
-def load_scene(render_size: int = 1024) -> tuple[mi.Scene, mi.SceneParameters]:
+def load_scene(render_size: int = 1024) -> tuple[mi.Scene, mi.SceneParameters, dict, SDConfig]:
     T = mi.ScalarTransform4f
 
     scene_dict = {
@@ -113,13 +114,23 @@ def load_scene(render_size: int = 1024) -> tuple[mi.Scene, mi.SceneParameters]:
         }
     }
 
-    view_params = {
+    sd_config = SDConfig(
+        prompt="A photo of a blue dragon statue on a piedestal, with a sword in its claws and two stones on the sides, under a directional light",
+        negative_prompt="",
+        cn_cond_scale=0.6,
+        render_size=render_size,
+        guidance_scale=50.0,
+        min_time=0.02,
+        max_time=0.98
+    )
+
+    scene_metadata = {
         'scene_name': 'dragon',
-        'prompt': "A photo of a blue dragon statue on a piedestal, with a sword in its claws and two stones on the sides, under a directional light",
+        'is_2d': False,
         'target': mi.ScalarVector3f(0, 7, 0),
         'radius': 60,
     }
 
     scene = mi.load_dict(scene_dict, optimize=False)
     scene_params = mi.traverse(scene)
-    return scene, scene_params, view_params
+    return scene, scene_params, scene_metadata, sd_config
