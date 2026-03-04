@@ -57,7 +57,7 @@ for i in iterator:
         opt.step()
         
         for k, v in opt.items():
-            opt[k] = dr.clip(opt[k], 0, 1)
+            opt[k] = dr.clip(v, 0, 1)
 
         scene_params.update(opt)
         iterator.set_postfix(loss=loss.item())

@@ -11,3 +11,6 @@ torchvision
 accelerate
 diffusers
 transformers
+
+# For visualization of the optimization process
+polyscope
