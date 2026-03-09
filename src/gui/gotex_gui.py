@@ -8,6 +8,7 @@ import sys
 import os
 import random
 import argparse
+import traceback
 import importlib
 import importlib.util
 from pathlib import Path
@@ -20,11 +21,12 @@ import polyscope as ps
 import polyscope.imgui as psim
 
 # Add src directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from gui_base import MitsubaGUI, BaseGUIState
-from sd import StableDiffusion
-from renderer import randomize_sensor, get_depth
+from src.models.sd import StableDiffusion
+from models.instaflow import Instaflow
+from src.renderer import randomize_sensor, get_depth
 
 
 @dataclass
@@ -33,8 +35,12 @@ class GoTexGUIState(BaseGUIState):
     # Optimization controls
     is_optimizing: bool = False
     learning_rate: float = 3e-2
-    nb_acc_steps: int = 2
-    nb_sensors: int = 32
+    nb_acc_steps: int = 1
+    nb_sensors: int = 128
+    cfg_scale: float = 7.5
+    loss_ema_epsilon: float = 0.9  # EMA smoothing factor
+    min_time: float = 0.02
+    max_time: float = 0.98
     
     # Optimization progress
     opt_step: int = 0
@@ -89,7 +95,7 @@ class GoTexGUI(MitsubaGUI):
                 module = importlib.import_module(path)
                 load_scene = module.load_scene
         
-        scene, _, scene_metadata, sd_config = load_scene(1024)
+        scene, _, scene_metadata, sd_config = load_scene(512)
         
         # Store metadata and config for later use
         self.scene_metadata = scene_metadata
@@ -114,13 +120,20 @@ class GoTexGUI(MitsubaGUI):
             self.sd_config.prompt = self.prompt_override
             print(f"Using custom prompt: {self.prompt_override}")
         
+        # Initialize CFG scale from config
+        self.gui_state.cfg_scale = self.sd_config.get('guidance_scale', 7.5)
+        self.gui_state.min_time = self.sd_config.get('min_time', 0.02)
+        self.gui_state.max_time = self.sd_config.get('max_time', 0.98)
+        
         # Initialize Stable Diffusion model
         print("Loading Stable Diffusion model...")
-        self.sd = StableDiffusion(
+        self.sd = Instaflow(
             config=self.sd_config,
+            instaflow=False,
             device=self.torch_device,
             enable_offload=False
         )
+        del self.sd_config
         print("Stable Diffusion model loaded!")
         
         # Setup optimizer for scene parameters
@@ -151,6 +164,10 @@ class GoTexGUI(MitsubaGUI):
             # Render depth and image
             dr_depth = get_depth(self.scene, sensor=self.scene.sensors()[0])
             dr_image = mi.render(self.scene, params=self.scene_params, seed=self.gui_state.opt_step)
+
+            # Simple tone mapping for Stable Diffusion input
+            dr_image = dr_image / (dr_image + 1)
+            dr_image = dr_image ** (1/2.2)
             
             # Compute loss using Stable Diffusion
             loss_rdfs = self.sd.compute_rdfs_loss(dr_image, dr_depth)
@@ -161,7 +178,16 @@ class GoTexGUI(MitsubaGUI):
             
             # Update counter
             self.gui_state.acc_step_counter += 1
-            self.gui_state.current_loss = float(loss.item())
+            
+            # Update loss with exponential moving average
+            new_loss = float(loss.item())
+            if self.gui_state.opt_step == 0 and self.gui_state.acc_step_counter == 1:
+                # Initialize on first step
+                self.gui_state.current_loss = new_loss
+            else:
+                # EMA: loss = old_loss * epsilon + new_loss * (1 - epsilon)
+                epsilon = self.gui_state.loss_ema_epsilon
+                self.gui_state.current_loss = self.gui_state.current_loss * epsilon + new_loss * (1 - epsilon)
             
             # Optimization step after accumulating gradients
             if self.gui_state.acc_step_counter >= self.gui_state.nb_acc_steps:
@@ -182,6 +208,7 @@ class GoTexGUI(MitsubaGUI):
             
         except Exception as e:
             print(f"Optimization error: {e}")
+            traceback.print_exc()
             self.gui_state.is_optimizing = False
     
     def draw_custom_gui(self, reset_rendering):
@@ -262,6 +289,42 @@ class GoTexGUI(MitsubaGUI):
                 if changed:
                     self.gui_state.nb_sensors = new_sensors
             
+            # CFG Scale
+            changed, new_cfg = psim.SliderFloat(
+                "CFG Scale",
+                self.gui_state.cfg_scale,
+                1.0, 100.0,
+                format="%.2f"
+            )
+            if changed:
+                self.gui_state.cfg_scale = new_cfg
+                # Update the model config
+                self.sd.config['guidance_scale'] = new_cfg
+            
+            # Min Time
+            changed, new_min_time = psim.SliderFloat(
+                "Min Time",
+                self.gui_state.min_time,
+                0.0, 1.0,
+                format="%.3f"
+            )
+            if changed:
+                self.gui_state.min_time = new_min_time
+                # Update the model config
+                self.sd.config['min_time'] = new_min_time
+            
+            # Max Time
+            changed, new_max_time = psim.SliderFloat(
+                "Max Time",
+                self.gui_state.max_time,
+                0.0, 1.0,
+                format="%.3f"
+            )
+            if changed:
+                self.gui_state.max_time = new_max_time
+                # Update the model config
+                self.sd.config['max_time'] = new_max_time
+            
             psim.Separator()
             
             # Save textures button
@@ -274,8 +337,6 @@ class GoTexGUI(MitsubaGUI):
     
     def handle_custom_input(self):
         """Handle optimization-specific keyboard shortcuts"""
-        io = psim.GetIO()
-        
         # Toggle optimization with 'O' key
         if psim.IsKeyPressed(psim.ImGuiKey_O):
             self.gui_state.is_optimizing = not self.gui_state.is_optimizing
@@ -297,6 +358,10 @@ class GoTexGUI(MitsubaGUI):
         try:
             # Render current view
             dr_image = mi.render(self.scene, params=self.scene_params, seed=0)
+            
+            dr_image = dr_image / (dr_image + 1)
+            dr_image = dr_image ** (1/2.2)
+            
             mi.util.write_bitmap(
                 str(output_dir / f'{self.gui_state.scene_name}_opt.exr'), dr_image
             )

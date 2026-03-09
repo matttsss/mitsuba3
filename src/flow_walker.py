@@ -7,7 +7,7 @@ from renderer import get_depth
 from scenes.dragon import load_scene
 from utils import save_latents_as_image, get_index_for_timestep, hdr_to_sdr
 
-from sd import StableDiffusion
+from models.sd import StableDiffusion
 
 mi.set_variant('cuda_ad_rgb')
 

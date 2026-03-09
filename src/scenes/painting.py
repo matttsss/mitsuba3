@@ -1,17 +1,16 @@
 from __future__ import annotations
 
 import mitsuba as mi
-from sd import SDConfig
 
-def load_scene(render_size: int = 1024) -> tuple[mi.Scene, mi.SceneParameters, dict, SDConfig]:
+def load_scene(render_size: int = 1024) -> tuple[mi.Scene, mi.SceneParameters, dict, dict]:
     T = mi.ScalarTransform4f
 
     scene_dict = {
         'type': 'scene',
         'integrator': {
-            'type': 'prb',
-            'max_depth': 2,
-            'hide_emitters': True
+            'type': 'direct',
+            'bsdf_samples': 0,
+            'emitter_samples': 1
         },
         # -------------------- Sensor --------------------
         'sensor': {
@@ -68,7 +67,7 @@ def load_scene(render_size: int = 1024) -> tuple[mi.Scene, mi.SceneParameters, d
     scene = mi.load_dict(scene_dict, optimize=True)
     scene_params = mi.traverse(scene)
 
-    sd_config = SDConfig(
+    sd_config = dict(
         prompt="A DSLR image of a hamburger",
         negative_prompt="",
         cn_cond_scale=0.0,

@@ -4,7 +4,7 @@ from tqdm.auto import trange
 import drjit as dr
 import mitsuba as mi
 
-from sd import StableDiffusion
+from models.sd import StableDiffusion
 from scenes.painting import load_scene
 from renderer import randomize_sensor, get_depth
 

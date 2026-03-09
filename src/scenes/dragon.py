@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import mitsuba as mi
-from sd import SDConfig
 
-def load_scene(render_size: int = 1024) -> tuple[mi.Scene, mi.SceneParameters, dict, SDConfig]:
+def load_scene(render_size: int = 1024) -> tuple[mi.Scene, mi.SceneParameters, dict, dict]:
     T = mi.ScalarTransform4f
 
     scene_dict = {
@@ -24,7 +23,7 @@ def load_scene(render_size: int = 1024) -> tuple[mi.Scene, mi.SceneParameters, d
             ),
             'sampler': {
                 'type': 'independent',
-                'sample_count': 64
+                'sample_count': 32
             },
             'film': {
                 'type': 'hdrfilm',
@@ -114,8 +113,8 @@ def load_scene(render_size: int = 1024) -> tuple[mi.Scene, mi.SceneParameters, d
         }
     }
 
-    sd_config = SDConfig(
-        prompt="A photo of a blue dragon statue on a piedestal, with a sword in its claws and two stones on the sides, under a directional light",
+    sd_config = dict(
+        prompt="A photo of a dragon with blue scale on a rocky piedestal, under a directional light",
         negative_prompt="",
         cn_cond_scale=0.6,
         render_size=render_size,
