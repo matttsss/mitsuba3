@@ -115,7 +115,7 @@ def load_scene(render_size: int = 1024) -> tuple[mi.Scene, mi.SceneParameters, d
 
     sd_config = dict(
         prompt="A photo of a dragon with blue scale on a rocky piedestal, under a directional light",
-        negative_prompt="",
+        negative_prompt="unrealistic, blurry, low quality, oversaturation.",
         cn_cond_scale=0.6,
         render_size=render_size,
         guidance_scale=50.0,

@@ -1,11 +1,11 @@
-import torch, random
+import torch, random, os
 from tqdm.auto import trange
 
 import drjit as dr
 import mitsuba as mi
 
 from models.sd import StableDiffusion
-from scenes.painting import load_scene
+from scenes.dragon import load_scene
 from renderer import randomize_sensor, get_depth
 
 mi.set_variant('cuda_ad_rgb')
@@ -18,7 +18,7 @@ pt_generator = torch.Generator(device=device).manual_seed(seed)
 dr_generator = dr.rng(seed=seed)
 
 # Instantiate scene
-render_size = 1024
+render_size = 512
 scene, scene_params, scene_metadata, sd_config = load_scene(render_size)
 sd = StableDiffusion(config=sd_config, device=device, generator=pt_generator, enable_offload=False)
 
@@ -30,10 +30,13 @@ opt = mi.ad.Adam(lr=3e-2, params = {
 })
 scene_params.update(opt)
 
-nb_sensors = 32
-nb_opt_steps = 5000
+out_folder = f'outputs/{scene_metadata["scene_name"]}'
+os.makedirs(out_folder, exist_ok=True)
+
+nb_sensors = 512
+nb_opt_steps = 15000
 nb_acc_steps = 2
-nb_steps_save = 10
+nb_steps_save = 200
 
 iterator = trange(nb_opt_steps * nb_acc_steps, desc="Optimizing")
 for i in iterator:
@@ -53,6 +56,7 @@ for i in iterator:
     dr.backward(loss)
 
     if (i + 1) % nb_acc_steps == 0:
+        actual_steps = (i + 1) // nb_acc_steps
 
         opt.step()
         
@@ -62,9 +66,10 @@ for i in iterator:
         scene_params.update(opt)
         iterator.set_postfix(loss=loss.item())
 
-        actual_steps = (i + 1) // nb_acc_steps
-        if actual_steps % nb_steps_save == 0:
-            
-            mi.util.write_bitmap(f'outputs/{scene_metadata["scene_name"]}_tex/{scene_metadata["scene_name"]}_opt.exr', dr_image)
+        if actual_steps == 5000:
+            sd.set_min_max_time(0.02, 0.7)
+
+        if actual_steps % nb_steps_save == 0:            
+            mi.util.write_bitmap(os.path.join(out_folder, f'render.exr'), dr_image)
             for k, v in opt.items():
-                mi.util.write_bitmap(f'outputs/{scene_metadata["scene_name"]}_tex/{k.split(".")[0]}.exr', opt[k])
+                mi.util.write_bitmap(os.path.join(out_folder, f'{k.split(".")[0]}.exr'), opt[k])

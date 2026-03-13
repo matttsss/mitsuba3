@@ -20,6 +20,10 @@ class Distilator:
     def predict_velocity(self, latents: torch.FloatTensor, depth: torch.FloatTensor, timestep: float) -> torch.FloatTensor:
         raise NotImplementedError
     
+    def set_min_max_time(self, min_time: float, max_time: float):
+        self.config["min_time"] = min_time
+        self.config["max_time"] = max_time
+    
     @dr.wrap(source='drjit', target='torch')
     def compute_rdfs_loss(self, image: torch.FloatTensor, depth: torch.FloatTensor):
         image = image.unsqueeze(0).permute(0, 3, 1, 2)  # Convert to (1, C, H, W)
