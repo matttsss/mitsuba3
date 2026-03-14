@@ -220,24 +220,26 @@ def load_scene(render_size: int = 1024) -> tuple[mi.Scene, mi.SceneParameters, d
         },
     }
 
-    scene = mi.load_dict(scene_dict, optimize=False)
-    scene_params = mi.traverse(scene)
-
-    sd_config = dict(
-        prompt="A photo of a coffee maker, with a yellow casing, metal pipes and support, a glass bowl",
-        negative_prompt="",
-        cn_cond_scale=0.6,
-        render_size=render_size,
-        guidance_scale=50.0,
-        min_time=0.02,
-        max_time=0.98
-    )
-
-    scene_metadata = {
+    return {
         'scene_name': 'coffee_maker',
-        'is_2d': False,
-        'target': mi.ScalarVector3f(0, 0.2, 0),
-        'radius': 1
-    }
+        'scene': scene_dict,
 
-    return scene, scene_params, scene_metadata, sd_config
+        'camera_config': {
+            'is_2d': False,
+            'target': mi.ScalarPoint3f(0, 0.2, 0),
+            'radius_min': 0.8,
+            'radius_max': 1.2,
+            'elevation_min': -10,
+            'elevation_max': 80
+        },
+
+        'sd_config': {
+            'prompt': "A photo of a coffee maker, with a yellow casing, metal pipes and support, a glass bowl",
+            'negative_prompt': "",
+            'cn_cond_scale': 0.6,
+            'render_size': render_size,
+            'guidance_scale': 50.0,
+            'min_time': 0.02,
+            'max_time': 0.98
+        }
+    }

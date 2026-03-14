@@ -26,8 +26,16 @@ class Distilator:
     
     @dr.wrap(source='drjit', target='torch')
     def compute_rdfs_loss(self, image: torch.FloatTensor, depth: torch.FloatTensor):
-        image = image.unsqueeze(0).permute(0, 3, 1, 2)  # Convert to (1, C, H, W)
-        depth = depth.detach().unsqueeze(0).repeat(3, 1, 1).unsqueeze(0)  # Convert to (1, 3, H, W)
+
+        if image.ndim == 3:
+            image = image.unsqueeze(0).permute(0, 3, 1, 2)  # Convert (H, W, C) to (1, C, H, W)
+            depth = depth.detach().unsqueeze(0).repeat(3, 1, 1).unsqueeze(0)  # Convert to (1, 3, H, W)
+        elif image.ndim == 4:
+            # Don't ask about the weird order, it's the batch sensor 
+            image = image.permute(1, 3, 0, 2)  # Convert (H, B, W, C) to (B, C, H, W)
+            depth = depth.detach().unsqueeze(-1).repeat(1, 1, 1, 3).permute(1, 3, 0, 2)  # Convert to (B, 3, H, W)
+        else:
+            raise ValueError(f"Unsupported image shape: {image.shape}")
 
         latents = self.encode_image(image).float()
         return self.compute_rdfs_loss_torch(latents, depth)

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import random
+
 import drjit as dr
 import mitsuba as mi
 
@@ -21,6 +23,44 @@ def randomize_sensor(scene_params: mi.SceneParameters, sensor_to_world_key: str,
 
     scene_params[sensor_to_world_key] = mi.ScalarTransform4f.look_at(origin=origin, target=target, up=[0, 1, 0])
     scene_params.update()
+
+def random_transform(rng: dr.random.Generator, camera_config: dict) -> mi.ScalarTransform4f:
+    if random.random() < 0.5:
+            elevation_deg = rng.uniform(mi.ScalarFloat, shape=1, 
+                                             low=camera_config['elevation_min'], high=camera_config['elevation_max'])
+            elevation = dr.deg2rad(elevation_deg)
+    else:
+        elev_percent_low = (camera_config['elevation_min'] + 90.0) / 180.0
+        elev_percent_high = (camera_config['elevation_max'] + 90.0) / 180.0
+        u = rng.uniform(mi.ScalarFloat, shape=1, low=elev_percent_low, high=elev_percent_high)
+        elevation = dr.asin(2.0 * u - 1.0)
+
+
+    azimuth = rng.uniform(mi.ScalarFloat, shape=1, low=-dr.pi, high=dr.pi)
+
+    camera_distances = rng.uniform(
+        mi.ScalarFloat, shape=1, 
+        low=camera_config['radius_min'], high=camera_config['radius_max']
+    )
+
+    camera_perturb = 0.05
+
+    sp, cp = dr.sincos(azimuth)
+    st, ct = dr.sincos(elevation)
+    camera_positions = camera_distances * mi.ScalarVector3f(
+        sp * st, ct, -cp * st
+    )
+    camera_positions += rng.uniform(mi.ScalarVector3f, shape=(3,), 
+                                        low=-camera_perturb, high=camera_perturb)
+
+    center_perturb = 0.1
+    center = camera_config['target'] + rng.normal(mi.ScalarVector3f, shape=(3,), scale=center_perturb)
+
+    up_perturb = 0.02
+    up = rng.normal(mi.ScalarVector3f, shape=(3,), loc=mi.ScalarVector3f(0.0, 1.0, 0.0), scale=up_perturb)
+
+    return mi.ScalarTransform4f.look_at(camera_positions, center, up)
+
 
 @dr.freeze
 def get_depth(scene: mi.Scene, sensor: mi.Sensor) -> mi.TensorXf:

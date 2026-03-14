@@ -63,23 +63,22 @@ def load_scene(render_size: int = 1024) -> tuple[mi.Scene, mi.SceneParameters, d
             }
         },
     }
-
-    scene = mi.load_dict(scene_dict, optimize=True)
-    scene_params = mi.traverse(scene)
-
-    sd_config = dict(
-        prompt="A DSLR image of a hamburger",
-        negative_prompt="",
-        cn_cond_scale=0.0,
-        render_size=render_size,
-        guidance_scale=50.0,
-        min_time=0.02,
-        max_time=0.98
-    )
-    scene_metadata = {
-        'is_2d': True,
+    
+    scene_config = {
         'scene_name': 'painting',
-        'render_size': render_size,
+        'scene': scene_dict,
+        'camera_config': {
+            'is_2d': True,
+        },
+        'sd_config': {
+            'prompt': "A DSLR image of a hamburger",
+            'negative_prompt': "",
+            'cn_cond_scale': 0.0,
+            'render_size': render_size,
+            'guidance_scale': 50.0,
+            'min_time': 0.02,
+            'max_time': 0.98
+        },
     }
 
-    return scene, scene_params, scene_metadata, sd_config
+    return scene_config

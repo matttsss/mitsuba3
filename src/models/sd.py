@@ -47,13 +47,16 @@ class StableDiffusion(Distilator):
 
         do_cfg = self.config["guidance_scale"] > 1.0
 
+        prompt_embeds = torch.cat([self.config["prompt_embeds"]] * latents.shape[0])
+        pooled_prompt_embeds = torch.cat([self.config["pooled_prompt_embeds"]] * latents.shape[0])
+
         if do_cfg:
+            negative_prompt_embeds = torch.cat([self.config["negative_prompt_embeds"]] * latents.shape[0])
+            negative_pooled_prompt_embeds = torch.cat([self.config["negative_pooled_prompt_embeds"]] * latents.shape[0])
+
             # Concatenate unconditional and conditional embeddings into a single forward pass
-            prompt_embeds = torch.cat([self.config["negative_prompt_embeds"], self.config["prompt_embeds"]], dim=0)
-            pooled_prompt_embeds = torch.cat([self.config["negative_pooled_prompt_embeds"], self.config["pooled_prompt_embeds"]], dim=0)
-        else:
-            prompt_embeds = self.config["prompt_embeds"]
-            pooled_prompt_embeds = self.config["pooled_prompt_embeds"]
+            prompt_embeds = torch.cat([negative_prompt_embeds, prompt_embeds], dim=0)
+            pooled_prompt_embeds = torch.cat([negative_pooled_prompt_embeds, pooled_prompt_embeds], dim=0)
 
  
         # Expand inputs along batch dimension for classifier-free guidance
@@ -66,6 +69,9 @@ class StableDiffusion(Distilator):
         control_block_samples = None
         if self.config["cn_cond_scale"] != 0.0 and depth is not None:
             depth = depth.to(device=device, dtype=dtype)
+
+            if do_cfg:
+                depth = torch.cat([depth] * 2)
 
             # Prepare depth image as controlnet conditioning (encoded to latent space)
             controlnet_config = self.pipe.controlnet.config
