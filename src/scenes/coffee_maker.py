@@ -217,8 +217,12 @@ def load_scene(render_size: int = 1024, texture_dir: str | None = None) -> tuple
             'target': mi.ScalarPoint3f(0, 0.2, 0),
             'radius_min': 0.8,
             'radius_max': 1.2,
-            'elevation_min': -10,
-            'elevation_max': 80
+            'elevation_min': 0,
+            'elevation_max': 75,
+
+            'camera_perturb': 0.005,
+            'center_perturb': 0.01,
+            'up_perturb': 0.002
         },
 
         'sd_config': {

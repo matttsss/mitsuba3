@@ -3,12 +3,7 @@ from __future__ import annotations
 import mitsuba as mi
 from utils import resolve_texture_filename
 
-def load_scene(
-    render_size: int = 1024,
-    nb_sensors: int = 6,
-    texture_dir: str | None = None
-) -> dict:
-
+def load_scene(render_size: int = 1024, texture_dir: str | None = None) -> dict:
     return {
         'camera_config': {
             'is_2d': False,
@@ -16,7 +11,11 @@ def load_scene(
             'radius_min': 55,
             'radius_max': 65,
             'elevation_min': -10,
-            'elevation_max': 80
+            'elevation_max': 60,
+
+            'camera_perturb': 0.05,
+            'center_perturb': 0.1,
+            'up_perturb': 0.02
         },
 
         'scene_name': 'dragon',
@@ -29,15 +28,14 @@ def load_scene(
             },
             # -------------------- Sensor --------------------
             'sensor': {
-                'type': 'batch',
 
-                **{
-                    f'sensor_{i}': {
-                        'type': 'perspective',
-                        'fov': 30,
-                        'to_world': mi.ScalarTransform4f()
-                    } for i in range(nb_sensors)
-                },
+                'type': 'perspective',
+                'fov': 30,
+                'to_world': mi.ScalarTransform4f.look_at(
+                    origin=[50, 5, -40],
+                    target=[0, 10, 0],
+                    up=[0, 1, 0]
+                ),
 
                 'sampler': {
                     'type': 'independent',
@@ -45,7 +43,7 @@ def load_scene(
                 },
                 'film': {
                     'type': 'hdrfilm',
-                    'width' : nb_sensors * render_size,
+                    'width' : render_size,
                     'height': render_size,
                     'rfilter': {
                         'type': 'gaussian',

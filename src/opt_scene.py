@@ -8,77 +8,54 @@ from tqdm.auto import trange
 import drjit as dr
 import mitsuba as mi
 
-from models.sd import StableDiffusion
-from scenes.dragon import load_scene
-from renderer import random_transform, get_depth
+from trainer import Trainer
+from scenes.coffee_maker import load_scene
 
 def main(args):
     random.seed(args.seed)
     device = torch.device(args.device)
-    dr_generator = dr.rng(args.seed)
-    pt_generator = torch.Generator(device=device).manual_seed(args.seed)
 
-    scene_config = load_scene(args.render_size, nb_sensors=args.nb_sensors)
+    scene_config = load_scene(args.render_size)
     camera_config = scene_config['camera_config']
     sd_config = scene_config['sd_config']
 
     scene = mi.load_dict(scene_config['scene'], optimize=False)
     scene_params: mi.SceneParameters = mi.traverse(scene)
-    camera_params: mi.SceneParameters = scene_params.copy()
+    
+    trainer = Trainer(
+        scene_params=scene_params,
+        camera_config=camera_config,
+        sd_config=sd_config,
+        device=device,
+        seed=args.seed
+    )
 
-    scene_params.keep(r'.*\.reflectance\.data')
-    camera_params.keep(r'.*\.sensor_\d*\.to_world')
-
-    sd = StableDiffusion(config=sd_config, device=device, generator=pt_generator, enable_offload=False)
-
-    opt = mi.ad.Adam(lr=args.lr, params=scene_params)
-    scene_params.update(opt)
+    trainer.setup_opt_sensors(args.nb_sensors, args.render_size)
 
     out_folder = f'outputs/{scene_config["scene_name"]}'
     os.makedirs(out_folder, exist_ok=True)
 
     iterator = trange(args.nb_opt_steps, desc="Optimizing", disable=args.disable_tqdm)
     for step_idx in iterator:
-        if not camera_config['is_2d']:
-            for k , _ in camera_params:
-                camera_params[k] = random_transform(dr_generator, camera_config)
-            camera_params.update()
+        
+        image, loss = trainer.step(scene, scene_params)
 
-        dr_depth = get_depth(scene, sensor=scene.sensors()[0])
-        dr_image = mi.render(scene, params=scene_params, seed=step_idx)
-
-        # Simple tone mapping for Stable Diffusion input
-        dr_image = dr_image / (dr_image + 1)
-        dr_image = dr_image ** (1/2.2)
-        dr_image = dr.clip(dr_image, 0, 1)
-
-        dr_depth = dr.reshape(mi.TensorXf, dr_depth, (args.render_size, args.nb_sensors, args.render_size))
-        dr_image = dr.reshape(mi.TensorXf, dr_image, (args.render_size, args.nb_sensors, args.render_size, 3))
-
-        loss = sd.compute_rdfs_loss(dr_image, dr_depth)
-        dr.backward(loss)
-        opt.step()
-
-        for k, v in opt.items():
-            opt[k] = dr.clip(v, 0, 1)
-
-        scene_params.update(opt)
         if not args.disable_tqdm:
-            iterator.set_postfix(loss=loss.item())
+            iterator.set_postfix(loss=loss)
 
         if step_idx == 2000:
-            sd.set_min_max_time(0.02, 0.7)
+            trainer.sd.set_min_max_time(0.02, 0.70)
 
         if step_idx % args.nb_steps_save == 0:
             if args.disable_tqdm:
-                print(f"step {step_idx:06d} | loss={loss.item():.6f}")
+                print(f"step {step_idx:06d} | loss={loss:.6f}")
             
-            images = dr_image.torch().permute(1, 0, 2, 3)
+            images = image.torch().permute(1, 0, 2, 3)
             for i, img in enumerate(images):
                 mi.util.write_bitmap(os.path.join(out_folder, f'render_{i}.exr'), img)
 
-            for k, v in opt.items():
-                mi.util.write_bitmap(os.path.join(out_folder, f'{k.split(".")[0]}.exr'), opt[k])
+            for k, v in trainer.opt.items():
+                mi.util.write_bitmap(os.path.join(out_folder, f'{k.split(".")[0]}.exr'), v)
 
 
 if __name__ == "__main__":

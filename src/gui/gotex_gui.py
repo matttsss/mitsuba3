@@ -23,10 +23,8 @@ import polyscope.imgui as psim
 # Add src directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from trainer import Trainer
 from gui_base import MitsubaGUI, BaseGUIState
-from src.models.sd import StableDiffusion
-from models.instaflow import Instaflow
-from src.renderer import random_transform, get_depth
 
 
 @dataclass
@@ -34,19 +32,8 @@ class GoTexGUIState(BaseGUIState):
     """Extended GUI state for optimization"""
     # Optimization controls
     is_optimizing: bool = False
-    learning_rate: float = 3e-2
-    nb_acc_steps: int = 1
-    nb_sensors: int = 128
-    cfg_scale: float = 7.5
-    loss_ema_epsilon: float = 0.9  # EMA smoothing factor
-    min_time: float = 0.02
-    max_time: float = 0.98
-    
-    # Optimization progress
-    opt_step: int = 0
-    current_loss: float = 0.0
-    acc_step_counter: int = 0
-    
+    nb_sensors: int = 6
+
     # Scene configuration
     scene_name: str = "painting"
     is_2d_scene: bool = True
@@ -67,10 +54,6 @@ class GoTexGUI(MitsubaGUI):
         # Initialize custom GUI state before calling parent constructor
         self.gui_state = GoTexGUIState()
         
-        # Optimization components (initialized in custom_init_setup)
-        self.sd = None
-        self.opt = None
-        self.sd_config = None
         self.prompt_override = prompt_override
         self.texture_dir_override = texture_dir
         
@@ -103,15 +86,10 @@ class GoTexGUI(MitsubaGUI):
         scene_config = load_scene(512, texture_dir=self.texture_dir_override)
         scene = mi.load_dict(scene_config['scene'], optimize=False)
 
-        sd_config = scene_config["sd_config"]
-        camera_config = scene_config["camera_config"]
-                
-        # Store metadata and config for later use
-        self.sd_config = sd_config
-        self.camera_config = camera_config
+        self.scene_config = scene_config
         self.gui_state.scene_name = scene_config['scene_name']
-        self.gui_state.is_2d_scene = camera_config['is_2d']
-        
+        self.gui_state.is_2d_scene = scene_config['camera_config']['is_2d']
+
         # Create integrator (scene loader returns it in the dict, but we need separate)
         integrator = self.create_integrator("path")
         
@@ -123,39 +101,25 @@ class GoTexGUI(MitsubaGUI):
         seed = 40
         random.seed(seed)
         torch.manual_seed(seed)
-        self.dr_generator = dr.rng(seed)
+
+        sd_config = self.scene_config['sd_config']
         
         # Override prompt if provided
         if self.prompt_override is not None:
-            self.sd_config['prompt'] = self.prompt_override
+            sd_config['prompt'] = self.prompt_override
             print(f"Using custom prompt: {self.prompt_override}")
         
-        # Initialize CFG scale from config
-        self.gui_state.cfg_scale = self.sd_config.get('guidance_scale', 7.5)
-        self.gui_state.min_time = self.sd_config.get('min_time', 0.02)
-        self.gui_state.max_time = self.sd_config.get('max_time', 0.98)
-        
-        # Initialize Stable Diffusion model
-        print("Loading Stable Diffusion model...")
-        self.sd = StableDiffusion(
-            config=self.sd_config,
+        self.trainer = Trainer(
+            scene_params=self.scene_params,
+            camera_config=self.scene_config['camera_config'],
+            sd_config=sd_config,
             device=self.torch_device,
-            enable_offload=False
+            seed=seed
         )
-        del self.sd_config
-        print("Stable Diffusion model loaded!")
 
-        # Collect camera to world keys for randomization
-        self.camera_params = self.scene_params.copy()
-        self.camera_params.keep(r'.*\.sensor_\d*\.to_world')
+        self.trainer.setup_opt_sensors(6, 512)
 
-        # Setup optimizer for scene parameters
-        self.scene_params.keep(r'.*\.reflectance\.data')
-        self.opt = mi.ad.Adam(
-            lr=self.gui_state.learning_rate,
-            params=self.scene_params
-        )
-        self.scene_params.update(self.opt)
+        del self.scene_config
     
     def custom_gui_callback_step(self):
         """Perform optimization step if enabled"""
@@ -163,46 +127,7 @@ class GoTexGUI(MitsubaGUI):
             return
         
         try:
-            # Randomize camera viewpoint for 3D scenes
-            if not self.gui_state.is_2d_scene:
-                for k, _ in self.camera_params:
-                    self.camera_params[k] = random_transform(self.dr_generator, self.camera_config)
-                self.camera_params.update()
-            
-            # Render depth and image
-            dr_depth = get_depth(self.scene, sensor=self.scene.sensors()[0])
-            dr_image = mi.render(self.scene, params=self.scene_params, seed=self.gui_state.opt_step)
-
-            # Simple tone mapping for Stable Diffusion input
-            dr_image = dr_image / (dr_image + 1)
-            dr_image = dr_image ** (1/2.2)
-            dr_image = dr.clip(dr_image, 0, 1)
-            
-            # Compute loss using Stable Diffusion
-            loss = self.sd.compute_rdfs_loss(dr_image, dr_depth)
-            
-            # Backward pass
-            dr.backward(loss)
-            
-            # Update loss with exponential moving average
-            new_loss = float(loss.item())
-            if self.gui_state.opt_step == 0:
-                # Initialize on first step
-                self.gui_state.current_loss = new_loss
-            else:
-                # EMA: loss = old_loss * epsilon + new_loss * (1 - epsilon)
-                epsilon = self.gui_state.loss_ema_epsilon
-                self.gui_state.current_loss = self.gui_state.current_loss * epsilon + new_loss * (1 - epsilon)
-            
-            self.opt.step()
-            
-            # Clip values to valid range
-            for k, v in self.opt.items():
-                self.opt[k] = dr.clip(v, 0, 1)
-            
-            self.scene_params.update(self.opt)
-            self.gui_state.opt_step += 1
-
+            self.trainer.step(self.scene, self.scene_params)
         except Exception as e:
             print(f"Optimization error: {e}")
             traceback.print_exc()
@@ -220,7 +145,7 @@ class GoTexGUI(MitsubaGUI):
                 psim.PushStyleColor(psim.ImGuiCol_Button, (0.8, 0.2, 0.2, 0.6))
                 psim.PushStyleColor(psim.ImGuiCol_ButtonHovered, (0.9, 0.3, 0.3, 0.9))
                 psim.PushStyleColor(psim.ImGuiCol_ButtonActive, (0.7, 0.1, 0.1, 1.0))
-                if psim.Button("Stop Optimization (O)"):
+                if psim.Button("Pause Optimization (O)"):
                     self.gui_state.is_optimizing = False
                 psim.PopStyleColor(3)
             else:
@@ -229,98 +154,17 @@ class GoTexGUI(MitsubaGUI):
                 psim.PushStyleColor(psim.ImGuiCol_ButtonActive, (0.18, 0.29, 0.23, 1.0))
                 if psim.Button("Start Optimization (O)"):
                     self.gui_state.is_optimizing = True
-                    self.gui_state.opt_step = 0
-                    self.gui_state.acc_step_counter = 0
                 psim.PopStyleColor(3)
             
             psim.SameLine()
             if psim.Button("Reset Optimizer"):
-                self.opt = mi.ad.Adam(
-                    lr=self.gui_state.learning_rate,
-                    params=self.scene_params
-                )
-                self.scene_params.update(self.opt)
-                self.gui_state.opt_step = 0
-                self.gui_state.acc_step_counter = 0
+                raise NotImplementedError("Resetting optimizer is not implemented yet")
                 reset_rendering = True
             
             # Optimization progress
-            psim.Text(f"Step: {self.gui_state.opt_step}")
+            psim.Text(f"Step: {self.trainer.step_idx}")
             psim.SameLine()
-            psim.Text(f"| Loss: {self.gui_state.current_loss:.6f}")
-            
-            psim.Separator()
-            
-            # Learning rate
-            changed, new_lr = psim.SliderFloat(
-                "Learning Rate",
-                self.gui_state.learning_rate,
-                0.0001, 0.1,
-                format="%.4f",
-                flags=psim.ImGuiSliderFlags_Logarithmic
-            )
-            if changed:
-                self.gui_state.learning_rate = new_lr
-                # Update optimizer learning rate
-                if self.opt is not None:
-                    for param in self.opt.values():
-                        if hasattr(param, 'lr'):
-                            param.lr = new_lr
-            
-            # Accumulation steps
-            changed, new_acc = psim.SliderInt(
-                "Accumulation Steps",
-                self.gui_state.nb_acc_steps,
-                1, 10
-            )
-            if changed:
-                self.gui_state.nb_acc_steps = new_acc
-            
-            # Number of sensors (for 3D scenes)
-            if not self.gui_state.is_2d_scene:
-                changed, new_sensors = psim.SliderInt(
-                    "Camera Positions",
-                    self.gui_state.nb_sensors,
-                    4, 128
-                )
-                if changed:
-                    self.gui_state.nb_sensors = new_sensors
-            
-            # CFG Scale
-            changed, new_cfg = psim.SliderFloat(
-                "CFG Scale",
-                self.gui_state.cfg_scale,
-                1.0, 100.0,
-                format="%.2f"
-            )
-            if changed:
-                self.gui_state.cfg_scale = new_cfg
-                # Update the model config
-                self.sd.config['guidance_scale'] = new_cfg
-            
-            # Min Time
-            changed, new_min_time = psim.SliderFloat(
-                "Min Time",
-                self.gui_state.min_time,
-                0.0, 1.0,
-                format="%.3f"
-            )
-            if changed:
-                self.gui_state.min_time = new_min_time
-                # Update the model config
-                self.sd.config['min_time'] = new_min_time
-            
-            # Max Time
-            changed, new_max_time = psim.SliderFloat(
-                "Max Time",
-                self.gui_state.max_time,
-                0.0, 1.0,
-                format="%.3f"
-            )
-            if changed:
-                self.gui_state.max_time = new_max_time
-                # Update the model config
-                self.sd.config['max_time'] = new_max_time
+            psim.Text(f"| Loss: {self.trainer.ema_loss:.6f}")
             
             psim.Separator()
             
@@ -364,7 +208,7 @@ class GoTexGUI(MitsubaGUI):
             )
             
             # Save individual texture parameters
-            for k, v in self.opt.items():
+            for k, v in self.trainer.opt.items():
                 param_name = k.split(".")[0]
                 mi.util.write_bitmap(
                     str(output_dir / f'{param_name}.exr'), v
