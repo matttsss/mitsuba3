@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from gui_base import MitsubaGUI, BaseGUIState
 from src.models.sd import StableDiffusion
 from models.instaflow import Instaflow
-from src.renderer import randomize_sensor, get_depth
+from src.renderer import random_transform, get_depth
 
 
 @dataclass
@@ -57,17 +57,22 @@ class GoTexGUI(MitsubaGUI):
     Extended Mitsuba GUI with integrated texture optimization using Stable Diffusion.
     """
     
-    def __init__(self, scene_path=None, prompt_override=None, program_name="GoTex - Texture Optimization"):
+    def __init__(
+        self,
+        scene_path=None,
+        prompt_override=None,
+        texture_dir=None,
+        program_name="GoTex - Texture Optimization"
+    ):
         # Initialize custom GUI state before calling parent constructor
         self.gui_state = GoTexGUIState()
         
         # Optimization components (initialized in custom_init_setup)
         self.sd = None
         self.opt = None
-        self.scene_metadata = None
         self.sd_config = None
-        self.camera_to_world_key = 'sensor.to_world'
         self.prompt_override = prompt_override
+        self.texture_dir_override = texture_dir
         
         # Torch setup
         self.torch_device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -94,14 +99,18 @@ class GoTexGUI(MitsubaGUI):
                 # Assume it's a module path like "scenes.painting" or "scenes.dragon"
                 module = importlib.import_module(path)
                 load_scene = module.load_scene
-        
-        scene, _, scene_metadata, sd_config = load_scene(512)
-        
+            
+        scene_config = load_scene(512, texture_dir=self.texture_dir_override)
+        scene = mi.load_dict(scene_config['scene'], optimize=False)
+
+        sd_config = scene_config["sd_config"]
+        camera_config = scene_config["camera_config"]
+                
         # Store metadata and config for later use
-        self.scene_metadata = scene_metadata
         self.sd_config = sd_config
-        self.gui_state.scene_name = scene_metadata['scene_name']
-        self.gui_state.is_2d_scene = scene_metadata['is_2d']
+        self.camera_config = camera_config
+        self.gui_state.scene_name = scene_config['scene_name']
+        self.gui_state.is_2d_scene = camera_config['is_2d']
         
         # Create integrator (scene loader returns it in the dict, but we need separate)
         integrator = self.create_integrator("path")
@@ -114,10 +123,11 @@ class GoTexGUI(MitsubaGUI):
         seed = 40
         random.seed(seed)
         torch.manual_seed(seed)
+        self.dr_generator = dr.rng(seed)
         
         # Override prompt if provided
         if self.prompt_override is not None:
-            self.sd_config.prompt = self.prompt_override
+            self.sd_config['prompt'] = self.prompt_override
             print(f"Using custom prompt: {self.prompt_override}")
         
         # Initialize CFG scale from config
@@ -127,20 +137,23 @@ class GoTexGUI(MitsubaGUI):
         
         # Initialize Stable Diffusion model
         print("Loading Stable Diffusion model...")
-        self.sd = Instaflow(
+        self.sd = StableDiffusion(
             config=self.sd_config,
-            instaflow=False,
             device=self.torch_device,
             enable_offload=False
         )
         del self.sd_config
         print("Stable Diffusion model loaded!")
-        
+
+        # Collect camera to world keys for randomization
+        self.camera_params = self.scene_params.copy()
+        self.camera_params.keep(r'.*\.sensor_\d*\.to_world')
+
         # Setup optimizer for scene parameters
-        self.scene_params.keep([r'.*\.reflectance\.data', self.camera_to_world_key])
+        self.scene_params.keep(r'.*\.reflectance\.data')
         self.opt = mi.ad.Adam(
             lr=self.gui_state.learning_rate,
-            params={k: v for k, v in self.scene_params.items() if self.camera_to_world_key not in k}
+            params=self.scene_params
         )
         self.scene_params.update(self.opt)
     
@@ -152,14 +165,9 @@ class GoTexGUI(MitsubaGUI):
         try:
             # Randomize camera viewpoint for 3D scenes
             if not self.gui_state.is_2d_scene:
-                randomize_sensor(
-                    self.scene_params,
-                    sensor_to_world_key=self.camera_to_world_key,
-                    sensor_idx=random.randint(0, self.gui_state.nb_sensors - 1),
-                    sensor_count=self.gui_state.nb_sensors,
-                    target=self.scene_metadata.get('target', mi.ScalarVector3f(0, 0, 0)),
-                    radius=self.scene_metadata.get('radius', 50)
-                )
+                for k, _ in self.camera_params:
+                    self.camera_params[k] = random_transform(self.dr_generator, self.camera_config)
+                self.camera_params.update()
             
             # Render depth and image
             dr_depth = get_depth(self.scene, sensor=self.scene.sensors()[0])
@@ -170,18 +178,14 @@ class GoTexGUI(MitsubaGUI):
             dr_image = dr_image ** (1/2.2)
             
             # Compute loss using Stable Diffusion
-            loss_rdfs = self.sd.compute_rdfs_loss(dr_image, dr_depth)
-            loss = loss_rdfs / self.gui_state.nb_acc_steps
+            loss = self.sd.compute_rdfs_loss(dr_image, dr_depth)
             
             # Backward pass
             dr.backward(loss)
             
-            # Update counter
-            self.gui_state.acc_step_counter += 1
-            
             # Update loss with exponential moving average
             new_loss = float(loss.item())
-            if self.gui_state.opt_step == 0 and self.gui_state.acc_step_counter == 1:
+            if self.gui_state.opt_step == 0:
                 # Initialize on first step
                 self.gui_state.current_loss = new_loss
             else:
@@ -189,23 +193,15 @@ class GoTexGUI(MitsubaGUI):
                 epsilon = self.gui_state.loss_ema_epsilon
                 self.gui_state.current_loss = self.gui_state.current_loss * epsilon + new_loss * (1 - epsilon)
             
-            # Optimization step after accumulating gradients
-            if self.gui_state.acc_step_counter >= self.gui_state.nb_acc_steps:
-                self.opt.step()
-                
-                # Clip values to valid range
-                for k, v in self.opt.items():
-                    self.opt[k] = dr.clip(v, 0, 1)
-                
-                self.scene_params.update(self.opt)
-                
-                # Reset accumulation counter and increment step
-                self.gui_state.acc_step_counter = 0
-                self.gui_state.opt_step += 1
-                
-                # Update accumulation buffer for display
-                self.reset_renderer()
+            self.opt.step()
             
+            # Clip values to valid range
+            for k, v in self.opt.items():
+                self.opt[k] = dr.clip(v, 0, 1)
+            
+            self.scene_params.update(self.opt)
+            self.gui_state.opt_step += 1
+
         except Exception as e:
             print(f"Optimization error: {e}")
             traceback.print_exc()
@@ -240,7 +236,7 @@ class GoTexGUI(MitsubaGUI):
             if psim.Button("Reset Optimizer"):
                 self.opt = mi.ad.Adam(
                     lr=self.gui_state.learning_rate,
-                    params={k: v for k, v in self.scene_params.items() if self.camera_to_world_key not in k}
+                    params=self.scene_params
                 )
                 self.scene_params.update(self.opt)
                 self.gui_state.opt_step = 0
@@ -394,10 +390,17 @@ def main():
         default=None,
         help='Custom prompt for Stable Diffusion. If not provided, uses the prompt from the scene configuration.'
     )
+    parser.add_argument(
+        '--texture-dir',
+        type=str,
+        default=None,
+        help='Directory containing per-object textures (e.g., dragon.exr, base.exr, sword.exr). '
+             'Passed to scene loaders that support texture_dir.'
+    )
     
     args = parser.parse_args()
     
-    gui = GoTexGUI(args.scene, prompt_override=args.prompt)
+    gui = GoTexGUI(args.scene, prompt_override=args.prompt, texture_dir=args.texture_dir)
     gui.run()
 
 

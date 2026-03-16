@@ -1,20 +1,22 @@
 import torch
+from pathlib import Path
 
-import mitsuba as mi
+def resolve_texture_filename(
+    texture_dir: str | Path | None,
+    object_name: str,
+    default_filename: str
+) -> str:
+    if texture_dir is None:
+        return default_filename
+    
+    texture_dir = Path(texture_dir) if texture_dir is not None else None
 
-def save_latents_as_image(sd, latents, filename):
-    image: torch.Tensor = sd.decode_latents(latents)
-    #image = sd.pipe.image_processor.postprocess(image, output_type='pt', do_denormalize=[False])
-    image = image.squeeze(0).permute(1, 2, 0)
-    mi.util.write_bitmap(filename, image)
+    for ext in ('.exr', '.png', '.jpg', '.jpeg', '.hdr', '.tif', '.tiff'):
+        candidate = texture_dir / f'{object_name}{ext}'
+        if candidate.exists():
+            return str(candidate)
 
-
-def get_index_for_timestep(timesteps, t):
-    for i, timestep in enumerate(timesteps):
-        if timestep <= t:
-            return i
-    return len(timesteps) - 1
-
+    return default_filename
 
 def hdr_to_sdr(img, exposure=1.0):
     # 1. Apply exposure

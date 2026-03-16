@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import mitsuba as mi
+from utils import resolve_texture_filename
 
-def load_scene(render_size: int = 1024) -> tuple[mi.Scene, mi.SceneParameters, dict, dict]:
+def load_scene(render_size: int = 1024, texture_dir: str | None = None) -> tuple[mi.Scene, mi.SceneParameters, dict, dict]:
     T = mi.ScalarTransform4f
 
     scene_dict = {
@@ -57,7 +58,11 @@ def load_scene(render_size: int = 1024) -> tuple[mi.Scene, mi.SceneParameters, d
                 'reflectance': {
                     'type': 'bitmap',
                     'raw': True,
-                    'filename': 'resources/noise_tex.exr',
+                    'filename': resolve_texture_filename(
+                        texture_dir,
+                        'background',
+                        'resources/noise_tex.exr'
+                    ),
                     'format': 'variant'
                 }
             }

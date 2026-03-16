@@ -1,8 +1,14 @@
 from __future__ import annotations
 
 import mitsuba as mi
+from utils import resolve_texture_filename
 
-def load_scene(render_size: int = 1024, nb_sensors: int = 16) -> dict:
+def load_scene(
+    render_size: int = 1024,
+    nb_sensors: int = 6,
+    texture_dir: str | None = None
+) -> dict:
+
     return {
         'camera_config': {
             'is_2d': False,
@@ -70,7 +76,11 @@ def load_scene(render_size: int = 1024, nb_sensors: int = 16) -> dict:
                     'type': 'diffuse',
                     'reflectance': {
                         'type': 'bitmap',
-                        'filename': 'resources/dragon/blue_tex.png',
+                        'filename': resolve_texture_filename(
+                            texture_dir,
+                            'dragon',
+                            'resources/dragon/blue_tex.png'
+                        ),
                         'format': 'variant'
                     }
                 }
@@ -82,7 +92,11 @@ def load_scene(render_size: int = 1024, nb_sensors: int = 16) -> dict:
                     'type': 'diffuse',
                     'reflectance': {
                         'type': 'bitmap',
-                        'filename': 'resources/dragon/grey_tex.png',
+                        'filename': resolve_texture_filename(
+                            texture_dir,
+                            'base',
+                            'resources/dragon/grey_tex.png'
+                        ),
                         'format': 'variant'
                     }
                 }
@@ -94,7 +108,11 @@ def load_scene(render_size: int = 1024, nb_sensors: int = 16) -> dict:
                     'type': 'diffuse',
                     'reflectance': {
                         'type': 'bitmap',
-                        'filename': 'resources/dragon/grey_tex.png',
+                        'filename': resolve_texture_filename(
+                            texture_dir,
+                            'bigstone',
+                            'resources/dragon/grey_tex.png'
+                        ),
                         'format': 'variant'
                     }
                 }
@@ -106,7 +124,11 @@ def load_scene(render_size: int = 1024, nb_sensors: int = 16) -> dict:
                     'type': 'diffuse',
                     'reflectance': {
                         'type': 'bitmap',
-                        'filename': 'resources/dragon/grey_tex.png',
+                        'filename': resolve_texture_filename(
+                            texture_dir,
+                            'smallstone',
+                            'resources/dragon/grey_tex.png'
+                        ),
                         'format': 'variant'
                     }
                 }
@@ -118,14 +140,18 @@ def load_scene(render_size: int = 1024, nb_sensors: int = 16) -> dict:
                     'type': 'diffuse',
                     'reflectance': {
                         'type': 'bitmap',
-                        'filename': 'resources/dragon/grey_tex.png',
+                        'filename': resolve_texture_filename(
+                            texture_dir,
+                            'sword',
+                            'resources/dragon/grey_tex.png'
+                        ),
                         'format': 'variant'
                     }
                 }
             }
         },
         'sd_config': {
-            'prompt': "A photo of a dragon with blue scale on a rocky piedestal, under a directional light",
+            'prompt': "A photo of a blue dragon on a sandypiedestal, under a directional light",
             'negative_prompt': "unrealistic, blurry, low quality, oversaturation.",
             'cn_cond_scale': 0.6,
             'render_size': render_size,

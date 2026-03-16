@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import mitsuba as mi
 
+from utils import resolve_texture_filename
 
 def list_to_mat4f(lst: list[float]) -> mi.ScalarTransform4f:
     assert len(lst) == 16, "List must have 16 elements to convert to a 4x4 matrix"
@@ -28,7 +29,7 @@ def get_light(to_world: mi.ScalarTransform4f) -> dict:
         'to_world': to_world
     }
 
-def load_scene(render_size: int = 1024) -> tuple[mi.Scene, mi.SceneParameters, dict, dict]:
+def load_scene(render_size: int = 1024, texture_dir: str | None = None) -> tuple[mi.Scene, mi.SceneParameters, dict, dict]:
     T = mi.ScalarTransform4f
 
     glass_bsdf = {
@@ -57,64 +58,6 @@ def load_scene(render_size: int = 1024) -> tuple[mi.Scene, mi.SceneParameters, d
             }
         }
     }
-
-    diffuse_black_bsdf = {
-        'type': 'diffuse',
-        'reflectance': {
-            'type': 'rgb',
-            'value': [0.00631, 0.00631, 0.00631]
-        }
-    }
-
-    if False:
-        plastic_orange_bsdf = {
-            'type': 'twosided',
-            'bsdf': {
-                'type': 'plastic',
-                'int_ior': 1.5,
-                'ext_ior': 1.0,
-                'nonlinear': True,
-                'diffuse_reflectance': {
-                    'type': 'rgb',
-                    'value': [1, 0.378676, 0.0134734]
-                }
-            }
-        }
-
-        plastic_black_bsdf = {
-            'type': 'twosided',
-            'bsdf': {
-                'type': 'roughplastic',
-                'int_ior': 1.5,
-                'ext_ior': 1.0,
-                'nonlinear': True,
-                'alpha': 0.1,
-                'distribution': 'ggx',
-                'diffuse_reflectance': {
-                    'type': 'rgb',
-                    'value': [0.00631, 0.00631, 0.00631]
-                }
-            }
-        }
-
-    else:
-        plastic_orange_bsdf = {
-            'type': 'diffuse',
-            'reflectance': {
-                'type': 'bitmap',
-                'filename': 'resources/coffee_maker/orange_tex.png',
-                'format': 'variant'
-            }
-        }
-
-        plastic_black_bsdf = {
-            'type': 'diffuse',
-            'reflectance': {
-                'type': 'bitmap',
-                'filename': 'resources/coffee_maker/black_tex.png',
-                'format': 'variant'
-            }
-        }
 
     scene_dict = {
         'type': 'scene',
@@ -186,17 +129,50 @@ def load_scene(render_size: int = 1024) -> tuple[mi.Scene, mi.SceneParameters, d
         'rubber_feet': {
             'type': 'ply',
             'filename': 'resources/coffee_maker/RubberFeet.ply',
-            'bsdf': diffuse_black_bsdf
+            'bsdf': {
+                'type': 'diffuse',
+                'reflectance': {
+                    'type': 'bitmap',
+                    'filename': resolve_texture_filename(
+                        texture_dir,
+                        'rubber_feet',
+                        'resources/coffee_maker/black_tex.png'
+                    ),
+                    'format': 'variant'
+                }
+            }
         },
         'black_inserts': {
             'type': 'ply',
             'filename': 'resources/coffee_maker/BlackInserts.ply',
-            'bsdf': diffuse_black_bsdf
+            'bsdf': {
+                'type': 'diffuse',
+                'reflectance': {
+                    'type': 'bitmap',
+                    'filename': resolve_texture_filename(
+                        texture_dir,
+                        'black_inserts',
+                        'resources/coffee_maker/black_tex.png'
+                    ),
+                    'format': 'variant'
+                }
+            }
         },
         'black_joint': {
             'type': 'ply',
             'filename': 'resources/coffee_maker/BlackJoint.ply',
-            'bsdf': plastic_black_bsdf
+            'bsdf': {
+                'type': 'diffuse',
+                'reflectance': {
+                    'type': 'bitmap',
+                    'filename': resolve_texture_filename(
+                        texture_dir,
+                        'black_joint',
+                        'resources/coffee_maker/black_tex.png'
+                    ),
+                    'format': 'variant'
+                }
+            }
         },
         'glass_bowl': {
             'type': 'ply',
@@ -216,7 +192,19 @@ def load_scene(render_size: int = 1024) -> tuple[mi.Scene, mi.SceneParameters, d
         'yellow_cassing': {
             'type': 'ply',
             'filename': 'resources/coffee_maker/YellowCassing.ply',
-            'bsdf': plastic_orange_bsdf
+            'bsdf': {
+                'type': 'diffuse',
+                'reflectance': {
+                    'type': 'bitmap',
+                    'filename': resolve_texture_filename(
+                        texture_dir,
+                        'yellow_cassing',
+                        'resources/coffee_maker/orange_tex.png'
+                    ),
+                    'format': 'variant'
+                }
+
+            }
         },
     }
 
