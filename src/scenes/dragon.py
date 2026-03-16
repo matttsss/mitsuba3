@@ -149,9 +149,9 @@ def load_scene(render_size: int = 1024, texture_dir: str | None = None) -> dict:
             }
         },
         'sd_config': {
-            'prompt': "A photo of a blue dragon on a sandypiedestal, under a directional light",
+            'prompt': "A photo of a blue dragon on a sandy piedestal, wings deeployed above his head, under a directional light",
             'negative_prompt': "unrealistic, blurry, low quality, oversaturation.",
-            'cn_cond_scale': 0.6,
+            'cn_cond_scale': 0.0,
             'render_size': render_size,
             'guidance_scale': 50.0,
             'min_time': 0.02,

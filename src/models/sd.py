@@ -23,36 +23,44 @@ class StableDiffusion(Distilator):
         # rename the model for interface in the distilator
         self.pipe.model = self.pipe.transformer
 
-        text_embedings = self._encode_prompt(config["prompt"], config["negative_prompt"])
-        self.config.update(text_embedings)
-
-        # Cleanup text encoders
-        del self.pipe.text_encoder
-        del self.pipe.text_encoder_2
-        del self.pipe.text_encoder_3
-        gc.collect()
-        torch.cuda.empty_cache()
-
         for param in self.pipe.vae.parameters():
             param.requires_grad_(False)
         for param in self.pipe.controlnet.parameters():
             param.requires_grad_(False)
         for param in self.pipe.model.parameters():
             param.requires_grad_(False)
+
+    def cleanup_text_encoders(self):
+        del self.pipe.text_encoder
+        del self.pipe.text_encoder_2
+        del self.pipe.text_encoder_3
+        gc.collect()
+        torch.cuda.empty_cache()
     
     @torch.no_grad()
-    def predict_velocity(self, latents: torch.Tensor, depth: torch.Tensor, timestep):
+    def predict_velocity(self, prompt_embedings: dict[str, torch.Tensor], latents: torch.Tensor, depth: torch.Tensor, timestep):
         device = self.device
         dtype = self.pipe.model.dtype
 
         do_cfg = self.config["guidance_scale"] > 1.0
+        
+        prompt_embeds = prompt_embedings["prompt_embeds"]
+        pooled_prompt_embeds = prompt_embedings["pooled_prompt_embeds"]
 
-        prompt_embeds = torch.cat([self.config["prompt_embeds"]] * latents.shape[0])
-        pooled_prompt_embeds = torch.cat([self.config["pooled_prompt_embeds"]] * latents.shape[0])
+        # Check if the prompts are already aligned with the batch size of latents; if not, repeat them
+        prompts_alligned = all(emb.shape[0] == latents.shape[0] for emb in prompt_embedings.values())
+        if not prompts_alligned:
+            prompt_embeds = torch.cat([prompt_embeds] * latents.shape[0])
+            pooled_prompt_embeds = torch.cat([pooled_prompt_embeds] * latents.shape[0])
 
         if do_cfg:
-            negative_prompt_embeds = torch.cat([self.config["negative_prompt_embeds"]] * latents.shape[0])
-            negative_pooled_prompt_embeds = torch.cat([self.config["negative_pooled_prompt_embeds"]] * latents.shape[0])
+
+            negative_prompt_embeds = prompt_embedings["negative_prompt_embeds"]
+            negative_pooled_prompt_embeds = prompt_embedings["negative_pooled_prompt_embeds"]
+
+            if not prompts_alligned:
+                negative_prompt_embeds = torch.cat([negative_prompt_embeds] * latents.shape[0])
+                negative_pooled_prompt_embeds = torch.cat([negative_pooled_prompt_embeds] * latents.shape[0])
 
             # Concatenate unconditional and conditional embeddings into a single forward pass
             prompt_embeds = torch.cat([negative_prompt_embeds, prompt_embeds], dim=0)

@@ -9,7 +9,7 @@ import drjit as dr
 import mitsuba as mi
 
 from trainer import Trainer
-from scenes.coffee_maker import load_scene
+from scenes.dragon import load_scene
 
 def main(args):
     random.seed(args.seed)

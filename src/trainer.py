@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import torch
+
 import drjit as dr
 import mitsuba as mi
 from models.sd import StableDiffusion
@@ -22,6 +24,16 @@ class Trainer:
         self._step_idx = 0
         self.ema_loss = 0
 
+        # '' is for the default prompt without directional cues
+        self.directions = ('front left', 'front right', 'back left', 'back right', '')
+
+        prompt = sd_config['prompt']
+        self.dir_to_prompt_embeds = {
+            direction: self.sd._encode_prompt(f"{prompt}, {direction}", self.sd.config["negative_prompt"])
+            for direction in self.directions
+        }
+        self.sd.cleanup_text_encoders()
+
         scene_params.keep(r'.*\.reflectance\.data')
         self.opt = mi.ad.Adam(lr=self.lr, params=scene_params)
         scene_params.update(self.opt)
@@ -41,10 +53,31 @@ class Trainer:
     def step(self, scene: mi.Scene, scene_params: mi.SceneParameters) -> tuple[mi.TensorXf, float]:
         # Randomize camera viewpoint for 3D scenes
         if not self.camera_config['is_2d']:
-            for k, _ in self.opt_sensor_params:
-                self.opt_sensor_params[k] = self.random_transform()
+            sensor_prompts = {
+                'prompt_embeds': [],
+                'pooled_prompt_embeds': [],
+                'negative_prompt_embeds': [],
+                'negative_pooled_prompt_embeds': [],
+            }
+
+            # For every sensor, sample camera dir and get it's associated prompt embeddings
+            for k in self.opt_sensor_params.keys():
+                transform, direction_label = self.random_transform()
+                self.opt_sensor_params[k] = transform
+
+                for prompt_type, prompts in sensor_prompts.items():
+                    prompts.append(self.dir_to_prompt_embeds[direction_label][prompt_type])
+
             self.opt_sensor_params.update()
-        
+
+            # Stack the prompt embeddings for all sensors into a single batch
+            prompt_embedings = {
+                prompt_type: torch.cat(prompts, dim=0) for prompt_type, prompts in sensor_prompts.items()
+            }
+        else:
+            # For 2D scenes, we can use the same prompt for the one sensor
+            prompt_embedings = self.dir_to_prompt_embeds['']
+
         # Render depth and image
         dr_depth = Trainer.get_depth(scene, sensor=self.opt_sensor)
         dr_image = mi.render(scene, params=scene_params, sensor=self.opt_sensor, seed=self._step_idx)
@@ -58,7 +91,7 @@ class Trainer:
         dr_image = dr.clip(dr_image, 0, 1)
         
         # Compute loss using Stable Diffusion
-        loss = self.sd.compute_rdfs_loss(dr_image, dr_depth)
+        loss = self.sd.compute_rdfs_loss(prompt_embedings, dr_image, dr_depth)
         
         # Backward pass
         dr.backward(loss)
@@ -78,6 +111,16 @@ class Trainer:
         self.ema_loss = self.ema_loss * epsilon + loss * (1 - epsilon)
         
         return dr_image, self.ema_loss
+
+    def _azimuth_to_direction(self, azimuth: float) -> str:
+        # Map azimuth quadrants to semantic prompt directions.
+        if -dr.pi / 2 <= azimuth < 0:
+            return 'front left'
+        if 0 <= azimuth < dr.pi / 2:
+            return 'front right'
+        if azimuth < -dr.pi / 2:
+            return 'back left'
+        return 'back right'
     
 
     def setup_opt_sensors(self, nb_sensors: int, render_size: int, fov: float = 30.0):
@@ -123,9 +166,9 @@ class Trainer:
         
         self.opt_sensor = mi.load_dict(sensor_dict, optimize=False)
         self.opt_sensor_params = mi.traverse(self.opt_sensor)
-        self.opt_sensor_params.keep(r'.*\.to_world')
+        self.opt_sensor_params.keep(r'.*to_world')
 
-    def random_transform(self) -> mi.ScalarTransform4f:
+    def random_transform(self) -> tuple[mi.ScalarTransform4f, str]:
         # if random.random() < 0.5:
         #         elevation_deg = rng.uniform(mi.ScalarFloat, shape=1, 
         #                                          low=camera_config['elevation_min'], high=camera_config['elevation_max'])
@@ -141,6 +184,7 @@ class Trainer:
         
         ct = self.generator.uniform(mi.ScalarFloat, shape=1, low=dr.cos(elevation_min_rad), high=dr.cos(elevation_max_rad))
         azimuth = self.generator.uniform(mi.ScalarFloat, shape=1, low=-dr.pi, high=dr.pi)
+        direction_label = self._azimuth_to_direction(azimuth)
 
         camera_distances = self.generator.uniform(
             mi.ScalarFloat, shape=1, 
@@ -163,7 +207,7 @@ class Trainer:
         up_perturb = self.camera_config['up_perturb']
         up = self.generator.normal(mi.ScalarVector3f, shape=(3,), loc=mi.ScalarVector3f(0.0, 1.0, 0.0), scale=up_perturb)
 
-        return mi.ScalarTransform4f.look_at(camera_positions, center, up)
+        return mi.ScalarTransform4f.look_at(camera_positions, center, up), direction_label
     
     @staticmethod
     @dr.freeze
