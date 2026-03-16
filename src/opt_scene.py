@@ -50,6 +50,7 @@ def main(args):
         # Simple tone mapping for Stable Diffusion input
         dr_image = dr_image / (dr_image + 1)
         dr_image = dr_image ** (1/2.2)
+        dr_image = dr.clip(dr_image, 0, 1)
 
         dr_depth = dr.reshape(mi.TensorXf, dr_depth, (args.render_size, args.nb_sensors, args.render_size))
         dr_image = dr.reshape(mi.TensorXf, dr_image, (args.render_size, args.nb_sensors, args.render_size, 3))

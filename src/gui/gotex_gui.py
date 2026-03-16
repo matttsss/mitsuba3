@@ -176,6 +176,7 @@ class GoTexGUI(MitsubaGUI):
             # Simple tone mapping for Stable Diffusion input
             dr_image = dr_image / (dr_image + 1)
             dr_image = dr_image ** (1/2.2)
+            dr_image = dr.clip(dr_image, 0, 1)
             
             # Compute loss using Stable Diffusion
             loss = self.sd.compute_rdfs_loss(dr_image, dr_depth)
