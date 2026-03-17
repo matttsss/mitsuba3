@@ -38,17 +38,16 @@ def main(args):
     iterator = trange(args.nb_opt_steps, desc="Optimizing", disable=args.disable_tqdm)
     for step_idx in iterator:
         
-        image, loss = trainer.step(scene, scene_params)
-
-        if not args.disable_tqdm:
-            iterator.set_postfix(loss=loss)
+        image, loss = trainer.step(scene, scene_params)            
 
         if step_idx == 2000:
             trainer.sd.set_min_max_time(0.02, 0.70)
 
         if step_idx % args.nb_steps_save == 0:
             if args.disable_tqdm:
-                print(f"step {step_idx:06d} | loss={loss:.6f}")
+                dr.print("step {step_idx} | {loss=}", step_idx=step_idx, loss=loss)
+            else:
+                iterator.set_postfix(loss=loss.item())
             
             images = image.torch().permute(1, 0, 2, 3)
             for i, img in enumerate(images):

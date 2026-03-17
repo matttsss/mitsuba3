@@ -22,7 +22,6 @@ class Trainer:
 
         self.lr = 3e-2
         self._step_idx = 0
-        self.ema_loss = 0
 
         # '' is for the default prompt without directional cues
         self.directions = ('front left', 'front right', 'back left', 'back right', '')
@@ -104,13 +103,7 @@ class Trainer:
         scene_params.update(self.opt)
         self._step_idx += 1
 
-        loss = float(loss.item())
-
-        # EMA: loss = old_loss * epsilon + new_loss * (1 - epsilon)
-        epsilon = 0.9
-        self.ema_loss = self.ema_loss * epsilon + loss * (1 - epsilon)
-        
-        return dr_image, self.ema_loss
+        return dr_image, loss
 
     def _azimuth_to_direction(self, azimuth: float) -> str:
         # Map azimuth quadrants to semantic prompt directions.

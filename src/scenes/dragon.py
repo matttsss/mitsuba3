@@ -77,7 +77,7 @@ def load_scene(render_size: int = 1024, texture_dir: str | None = None) -> dict:
                         'filename': resolve_texture_filename(
                             texture_dir,
                             'dragon',
-                            'resources/dragon/blue_tex.png'
+                            'resources/dragon/large_blue_tex.png'
                         ),
                         'format': 'variant'
                     }
@@ -149,7 +149,7 @@ def load_scene(render_size: int = 1024, texture_dir: str | None = None) -> dict:
             }
         },
         'sd_config': {
-            'prompt': "A photo of a blue dragon on a sandy piedestal, wings deeployed above his head, under a directional light",
+            'prompt': "A photo of a blue dragon on a sandy piedestal, wings deployed above his head",
             'negative_prompt': "unrealistic, blurry, low quality, oversaturation.",
             'cn_cond_scale': 0.0,
             'render_size': render_size,
