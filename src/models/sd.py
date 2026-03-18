@@ -1,7 +1,7 @@
 import gc
 
 import torch
-from src.models.distilator import Distilator
+from models.distilator import Distilator
 
 from diffusers import StableDiffusion3ControlNetPipeline
 from diffusers.models import SD3ControlNetModel
@@ -14,7 +14,9 @@ class StableDiffusion(Distilator):
         # Instantiate pipeline
         controlnet = SD3ControlNetModel.from_pretrained("InstantX/SD3-Controlnet-Depth", torch_dtype=torch.float16)
         self.pipe = StableDiffusion3ControlNetPipeline.from_pretrained(
-            "stabilityai/stable-diffusion-3-medium-diffusers", controlnet=controlnet, torch_dtype=torch.float16
+            "stabilityai/stable-diffusion-3-medium-diffusers", 
+            text_encoder_3=None,tokenizer_3=None,
+            controlnet=controlnet, torch_dtype=torch.float16
         ).to(device)
 
         if enable_offload:
