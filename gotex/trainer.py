@@ -4,7 +4,7 @@ import torch
 
 import drjit as dr
 import mitsuba as mi
-from models.sd import StableDiffusion
+from .models.sd import StableDiffusion
 
 class Trainer:
 

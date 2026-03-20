@@ -1,12 +1,11 @@
 import gc
 
 import torch
-from src.models.distilator import Distilator
 from diffusers import ControlNetModel
-
-
 from diffusers.pipelines import StableDiffusionControlNetPipeline
 from diffusers.schedulers import FlowMatchEulerDiscreteScheduler
+
+from .distilator import Distilator
 
 class Instaflow(Distilator):
    
@@ -137,35 +136,3 @@ class Instaflow(Distilator):
         image = self.pipe.image_processor.postprocess(image, output_type="pt", do_denormalize=[True])
         
         return image
-
-
-if __name__ == "__main__":
-    # Example usage
-    import mitsuba as mi
-    mi.set_variant('cuda_ad_rgb')
-
-    config = dict(
-        prompt="A blue dragon on a piedestal",
-        negative_prompt="",
-        cn_cond_scale=0.7,
-        render_size=512,
-        guidance_scale=1
-    )
-
-    depth_img = mi.TensorXf(mi.Bitmap("outputs/depth.exr")).torch().permute(2, 0, 1).repeat(3, 1, 1).unsqueeze(0)  # Convert to (1, C, H, W)
-
-    nb_steps = 50
-    dt = 1 / nb_steps
-    sd = Instaflow(config, instaflow=False, device='cuda', enable_offload=False)
-
-    with torch.no_grad():
-        latents = sd.prepare_latents(config["render_size"])
-
-        timesteps = torch.linspace(1000, 1, steps=nb_steps, device=sd.device)
-
-        for t in timesteps:
-            velocity_pred = sd.predict_velocity(latents, depth_img, t)
-            latents = latents + dt * velocity_pred
-
-        image = sd.decode_latents(latents)
-        mi.util.write_bitmap("outputs/generated_image.exr", image.squeeze(0).permute(1, 2, 0))

@@ -1,10 +1,10 @@
 import gc
 
 import torch
-from models.distilator import Distilator
-
 from diffusers import StableDiffusion3ControlNetPipeline
 from diffusers.models import SD3ControlNetModel
+
+from .distilator import Distilator
 
 class StableDiffusion(Distilator):
 
@@ -169,31 +169,3 @@ class StableDiffusion(Distilator):
             "pooled_prompt_embeds": pooled_prompt_embeds,
             "negative_pooled_prompt_embeds": negative_pooled_prompt_embeds
         }
-
-
-if __name__ == "__main__":
-    # Example usage
-    import mitsuba as mi
-    mi.set_variant('cuda_ad_rgb')
-
-    config = dict(
-        prompt="A photorealistic image of a mountain landscape at sunset",
-        negative_prompt="low quality, blurry",
-        cn_cond_scale=0.0,
-        render_size=1024,
-        guidance_scale=7.5
-    )
-    sd = StableDiffusion(config, 'cuda', enable_offload=False)
-
-    sd.pipe.scheduler.set_timesteps(50, device=sd.device)
-    timesteps = sd.pipe.scheduler.timesteps
-
-    with torch.no_grad():
-        latents = sd.prepare_latents(sd.config["render_size"])
-        for t in timesteps:
-            velocity_pred = sd.predict_velocity(latents, None, t)
-            latents = sd.pipe.scheduler.step(velocity_pred, t, latents, return_dict=False)[0]
-
-        generated_image = sd.decode_latents(latents)
-
-        mi.util.write_bitmap("outputs/generated_image.exr", generated_image.squeeze(0).permute(1, 2, 0))

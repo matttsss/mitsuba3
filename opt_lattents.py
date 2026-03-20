@@ -2,11 +2,13 @@ import os
 import random
 from tqdm.auto import tqdm
 
-import numpy as np
-from models.instaflow import Instaflow
-from models.sd import StableDiffusion
 import torch
 import torch.nn as nn
+
+import numpy as np
+
+from gotex.models.instaflow import Instaflow
+from gotex.models.sd import StableDiffusion
 
 import mitsuba as mi
 

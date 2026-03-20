@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import mitsuba as mi
-from utils import resolve_texture_filename
+from ..utils import resolve_texture_filename
 
 def load_scene(render_size: int = 1024, texture_dir: str | None = None) -> dict:
     return {

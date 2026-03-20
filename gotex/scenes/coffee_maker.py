@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import mitsuba as mi
 
-from utils import resolve_texture_filename
+from ..utils import resolve_texture_filename
 
 def list_to_mat4f(lst: list[float]) -> mi.ScalarTransform4f:
     assert len(lst) == 16, "List must have 16 elements to convert to a 4x4 matrix"
