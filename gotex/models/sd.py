@@ -28,6 +28,7 @@ class StableDiffusion(Distilator):
         self.vae = pipe.vae
         self.controlnet = pipe.controlnet
         self.image_processor = pipe.image_processor
+        self.scheduler = pipe.scheduler
 
         self.vae_scale_factor = pipe.vae_scale_factor
         self.num_train_steps = pipe.scheduler.config.num_train_timesteps

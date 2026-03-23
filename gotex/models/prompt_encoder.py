@@ -11,23 +11,44 @@ from transformers import (
 )
 
 class PromptEncoder(torch.nn.Module):
-    """Base prompt encoder that precomputes and caches T5 prompt embeddings.
+    """Prompt encoder that computes CLIP+T5 embeddings and caches combined prompt encodings."""
 
-    This class is responsible only for T5 embeddings. It can precompute embeddings
-    for a set of prompts and free the T5 encoder afterwards to save memory.
-    """
-
-    def __init__(self, device: torch.device, dtype: torch.dtype):
-        """Initialize the base encoder and load the T5 components."""
+    def __init__(self, prompts: list[str] | None, device: torch.device, dtype: torch.dtype):
         super().__init__()
-        self.text_encoder_3 = T5EncoderModel.from_pretrained("google/t5-v1_1-xxl", torch_dtype=dtype).to(device)
-        self.tokenizer_3 = T5TokenizerFast.from_pretrained("google/t5-v1_1-xxl", torch_dtype=dtype)
-
-        self.max_sequence_length = 256 # T5's maximum input length; can be adjusted if needed
-
+    
         self.device = device
         self.dtype = dtype
-        self.t5_prompt_embeds: dict[str, torch.Tensor] = {}
+
+        self.text_encoder = CLIPTextModelWithProjection.from_pretrained(
+            "openai/clip-vit-large-patch14", torch_dtype=dtype, use_safetensors=False
+        )
+        self.text_encoder_2 = CLIPTextModelWithProjection.from_pretrained(
+            "laion/CLIP-ViT-bigG-14-laion2B-39B-b160k", torch_dtype=dtype, use_safetensors=False
+        )
+        self.text_encoder_3 = T5EncoderModel.from_pretrained(
+            "google/t5-v1_1-xxl", torch_dtype=dtype
+        )
+
+
+        self.tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14", torch_dtype=dtype)
+        self.tokenizer_2 = CLIPTokenizer.from_pretrained("laion/CLIP-ViT-bigG-14-laion2B-39B-b160k", torch_dtype=dtype)
+        self.tokenizer_3 = T5TokenizerFast.from_pretrained("google/t5-v1_1-xxl", torch_dtype=dtype)
+
+        # T5's max input length
+        self.max_sequence_length = 256
+        # CLIP's max input length (same for both models)
+        self.tokenizer_max_length = self.tokenizer.model_max_length if self.tokenizer is not None else 77
+
+        self.cached_prompt_encodings: dict[str, dict[str, torch.Tensor]] = {}
+        if prompts is not None:
+            prompt_list = [prompts] if isinstance(prompts, str) else list(prompts)
+            prompt_embeds, pooled_prompt_embeds = self.compute_text_prompt_encodings(prompt_list, device=device)
+            
+            for idx, prompt in enumerate(prompt_list):
+                self.cached_prompt_encodings[prompt] = {
+                    "prompt_embeds": prompt_embeds[idx : idx + 1],
+                    "pooled_prompt_embeds": pooled_prompt_embeds[idx : idx + 1],
+                }
 
     # Copied from diffusers.pipelines.stable_diffusion_3.pipeline_stable_diffusion_3.StableDiffusion3Pipeline._get_t5_prompt_embeds
     def _get_t5_prompt_embeds(
@@ -39,14 +60,10 @@ class PromptEncoder(torch.nn.Module):
         device = device or self.device
         dtype = dtype or self.dtype
 
+        self.text_encoder_3.to(device=device)
+
         prompt = [prompt] if isinstance(prompt, str) else prompt
         batch_size = len(prompt)
-
-        if self.text_encoder_3 is None:
-            raise RuntimeError(
-                "T5 encoder is not available. Call `precompute_t5_prompt_embeds` before freeing it, "
-                "or instantiate a new encoder instance."
-            )
 
         text_inputs = self.tokenizer_3(
             prompt,
@@ -76,78 +93,75 @@ class PromptEncoder(torch.nn.Module):
         # duplicate text embeddings and attention mask for each generation per prompt, using mps friendly method
         prompt_embeds = prompt_embeds.view(batch_size, seq_len, -1)
 
+        self.text_encoder_3.to("cpu")
         return prompt_embeds
 
     @torch.no_grad()
-    def precompute_t5_prompt_embeds(
+    def compute_text_prompt_encodings(
         self,
         prompts: str | list[str],
         device: torch.device | None = None,
     ):
-        """Precompute and cache T5 embeddings, then free T5 model memory."""
+        """Precompute and cache combined CLIP+T5 encodings for prompt lookup."""
         device = device or self.device
 
-        prompt_list = [prompts] if isinstance(prompts, str) else list(prompts)
-        if not prompt_list:
-            return
+        prompts = [prompts] if isinstance(prompts, str) else list(prompts)
 
-        prompt_embeds = self._get_t5_prompt_embeds(
-            prompt=prompt_list,
+        self.text_encoder.to(device=device)
+        self.text_encoder_2.to(device=device)
+        prompt_embed, pooled_prompt_embed = self._get_clip_prompt_embeds(
+            prompt=prompts,
             device=device,
+            clip_skip=None,
+            clip_model_index=0,
+        )
+        prompt_2_embed, pooled_prompt_2_embed = self._get_clip_prompt_embeds(
+            prompt=prompts,
+            device=device,
+            clip_skip=None,
+            clip_model_index=1,
+        )
+        self.text_encoder.to("cpu")
+        self.text_encoder_2.to("cpu")
+
+        clip_prompt_embeds = torch.cat([prompt_embed, prompt_2_embed], dim=-1)
+
+        t5_prompt_embed = self._get_t5_prompt_embeds(prompt=prompts, device=device)
+
+        clip_prompt_embeds = torch.nn.functional.pad(
+            clip_prompt_embeds, (0, t5_prompt_embed.shape[-1] - clip_prompt_embeds.shape[-1])
         )
 
-        for idx, prompt in enumerate(prompt_list):
-            self.t5_prompt_embeds[prompt] = prompt_embeds[idx : idx + 1]
+        prompt_embeds = torch.cat([clip_prompt_embeds, t5_prompt_embed], dim=-2)
+        pooled_prompt_embeds = torch.cat([pooled_prompt_embed, pooled_prompt_2_embed], dim=-1)
 
-        # T5 is only used for precompute; release it to reduce memory pressure.
-        del self.text_encoder_3
-        del self.tokenizer_3
-        self.text_encoder_3 = None
-        self.tokenizer_3 = None
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        return prompt_embeds, pooled_prompt_embeds
 
-    def get_t5_prompt_embeds(
+    def _lookup_cached_prompt_encodings(
         self,
         prompt: str | list[str],
         device: torch.device | None = None,
-    ):
-        """Return cached T5 embeddings for one prompt or a batch of prompts."""
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         device = device or self.device
         prompt_list = [prompt] if isinstance(prompt, str) else prompt
 
-        missing = [p for p in prompt_list if p not in self.t5_prompt_embeds]
+        missing = [p for p in prompt_list if p not in self.cached_prompt_encodings]
         if missing:
             raise ValueError(
-                "Missing precomputed T5 embeddings for prompts: "
-                f"{missing}. Call `precompute_t5_prompt_embeds` with these prompts first."
+                "Missing cached text prompt encodings for prompts: "
+                f"{missing}. Provide these prompts at constructor time in `t5_precompute_prompts`."
             )
 
-        embeds = [
-            self.t5_prompt_embeds[p].to(device)
-            for p in prompt_list
-        ]
-        return torch.cat(embeds, dim=0)
-
-
-class TextPromptEncoder(PromptEncoder):
-    """Prompt encoder that computes CLIP embeddings and combines them with cached T5 embeddings."""
-
-    def __init__(self, device: torch.device, dtype: torch.dtype):
-        super().__init__(device=device, dtype=dtype)
-        self.text_encoder = CLIPTextModelWithProjection.from_pretrained(
-            "openai/clip-vit-large-patch14", torch_dtype=dtype, use_safetensors=False
-        ).to(device)
-        self.text_encoder_2 = CLIPTextModelWithProjection.from_pretrained(
-            "laion/CLIP-ViT-bigG-14-laion2B-39B-b160k", torch_dtype=dtype, use_safetensors=False
-        ).to(device)
-
-        self.tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14", torch_dtype=dtype)
-        self.tokenizer_2 = CLIPTokenizer.from_pretrained(
-            "laion/CLIP-ViT-bigG-14-laion2B-39B-b160k", torch_dtype=dtype
+        prompt_embeds = torch.cat(
+            [self.cached_prompt_encodings[p]["prompt_embeds"].to(device) for p in prompt_list],
+            dim=0,
         )
-        self.tokenizer_max_length = self.tokenizer.model_max_length if self.tokenizer is not None else 77
+        pooled_prompt_embeds = torch.cat(
+            [self.cached_prompt_encodings[p]["pooled_prompt_embeds"].to(device) for p in prompt_list],
+            dim=0,
+        )
+
+        return prompt_embeds, pooled_prompt_embeds
 
     # Copied from diffusers.pipelines.stable_diffusion_3.pipeline_stable_diffusion_3.StableDiffusion3Pipeline._get_clip_prompt_embeds
     def _get_clip_prompt_embeds(
@@ -205,54 +219,21 @@ class TextPromptEncoder(PromptEncoder):
     @torch.no_grad()
     def encode_prompt(
         self,
-        images: torch.Tensor,
         prompt: str | list[str],
         negative_prompt: str | list[str] | None = None,
+        images: torch.Tensor | None = None,
         device: torch.device | None = "cuda",
         do_classifier_free_guidance: bool = True,
-        clip_skip: int | None = None,
     ):
         device = device or self.device
-
-        # # set lora scale so that monkey patched LoRA
-        # # function of text encoder can correctly access it
-        # if lora_scale is not None and isinstance(self, SD3LoraLoaderMixin):
-        #     self._lora_scale = lora_scale
-
-        #     # dynamically adjust the LoRA scale
-        #     if self.text_encoder is not None and USE_PEFT_BACKEND:
-        #         scale_lora_layers(self.text_encoder, lora_scale)
-        #     if self.text_encoder_2 is not None and USE_PEFT_BACKEND:
-        #         scale_lora_layers(self.text_encoder_2, lora_scale)
 
         prompt = [prompt] if isinstance(prompt, str) else prompt
         batch_size = len(prompt)
 
-        prompt_embed, pooled_prompt_embed = self._get_clip_prompt_embeds(
-            prompt=prompt,
-            device=device,
-            clip_skip=clip_skip,
-            clip_model_index=0,
-        )
-        prompt_2_embed, pooled_prompt_2_embed = self._get_clip_prompt_embeds(
-            prompt=prompt,
-            device=device,
-            clip_skip=clip_skip,
-            clip_model_index=1,
-        )
-        clip_prompt_embeds = torch.cat([prompt_embed, prompt_2_embed], dim=-1)
-
-        t5_prompt_embed = self.get_t5_prompt_embeds(
+        prompt_embeds, pooled_prompt_embeds = self._lookup_cached_prompt_encodings(
             prompt=prompt,
             device=device,
         )
-
-        clip_prompt_embeds = torch.nn.functional.pad(
-            clip_prompt_embeds, (0, t5_prompt_embed.shape[-1] - clip_prompt_embeds.shape[-1])
-        )
-
-        prompt_embeds = torch.cat([clip_prompt_embeds, t5_prompt_embed], dim=-2)
-        pooled_prompt_embeds = torch.cat([pooled_prompt_embed, pooled_prompt_2_embed], dim=-1)
 
         negative_prompt_embeds = None
         negative_pooled_prompt_embeds = None
@@ -274,44 +255,10 @@ class TextPromptEncoder(PromptEncoder):
                     " the batch size of `prompt`."
                 )
 
-            negative_prompt_embed, negative_pooled_prompt_embed = self._get_clip_prompt_embeds(
+            negative_prompt_embeds, negative_pooled_prompt_embeds = self._lookup_cached_prompt_encodings(
                 negative_prompt,
                 device=device,
-                clip_skip=None,
-                clip_model_index=0,
             )
-            negative_prompt_2_embed, negative_pooled_prompt_2_embed = self._get_clip_prompt_embeds(
-                negative_prompt,
-                device=device,
-                clip_skip=None,
-                clip_model_index=1,
-            )
-            negative_clip_prompt_embeds = torch.cat([negative_prompt_embed, negative_prompt_2_embed], dim=-1)
-
-            t5_negative_prompt_embed = self.get_t5_prompt_embeds(
-                prompt=negative_prompt,
-                device=device,
-            )
-
-            negative_clip_prompt_embeds = torch.nn.functional.pad(
-                negative_clip_prompt_embeds,
-                (0, t5_negative_prompt_embed.shape[-1] - negative_clip_prompt_embeds.shape[-1]),
-            )
-
-            negative_prompt_embeds = torch.cat([negative_clip_prompt_embeds, t5_negative_prompt_embed], dim=-2)
-            negative_pooled_prompt_embeds = torch.cat(
-                [negative_pooled_prompt_embed, negative_pooled_prompt_2_embed], dim=-1
-            )
-
-        # if self.text_encoder is not None:
-        #     if isinstance(self, SD3LoraLoaderMixin) and USE_PEFT_BACKEND:
-        #         # Retrieve the original scale by scaling back the LoRA layers
-        #         unscale_lora_layers(self.text_encoder, lora_scale)
-
-        # if self.text_encoder_2 is not None:
-        #     if isinstance(self, SD3LoraLoaderMixin) and USE_PEFT_BACKEND:
-        #         # Retrieve the original scale by scaling back the LoRA layers
-        #         unscale_lora_layers(self.text_encoder_2, lora_scale)
 
         return {
             "prompt_embeds": prompt_embeds,

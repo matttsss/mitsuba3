@@ -5,7 +5,7 @@ import torch
 import drjit as dr
 import mitsuba as mi
 
-from gotex.models.prompt_encoder import TextPromptEncoder
+from gotex.models.prompt_encoder import PromptEncoder
 from .models.sd import StableDiffusion
 
 class Trainer:
@@ -22,8 +22,6 @@ class Trainer:
         )
         print("Stable Diffusion model loaded.")
 
-        self.prompt_encoder = TextPromptEncoder(device=device, dtype=self.sd.transformer.dtype)
-
         self.lr = 3e-2
         self._step_idx = 0
 
@@ -35,9 +33,8 @@ class Trainer:
         self.directional_prompts = {
                 direction: f"{self.prompt}, {direction}" for direction in self.directions
         }
-
-        # Precompute and cache T5 prompt embeddings once, then free the T5 encoder.
-        self.prompt_encoder.precompute_t5_prompt_embeds(list(self.directional_prompts.values()) + [self.negative_prompt])        
+        t5_precompute_prompts = list(self.directional_prompts.values()) + [self.negative_prompt]
+        self.prompt_encoder = PromptEncoder(prompts=t5_precompute_prompts, device=device, dtype=self.sd.transformer.dtype)
 
         scene_params.keep(r'.*\.reflectance\.data')
         self.opt = mi.ad.Adam(lr=self.lr, params=scene_params)
@@ -65,12 +62,6 @@ class Trainer:
         else:
             prompts = [self.prompt]  # Single prompt for 2D scenes
 
-        prompt_embedings = self.prompt_encoder.encode_prompt(
-            images=None,
-            prompt=prompts,
-            negative_prompt=self.negative_prompt
-        )
-
         # Render depth and image
         dr_depth = Trainer.get_depth(scene, sensor=self.opt_sensor)
         dr_image = mi.render(scene, params=scene_params, sensor=self.opt_sensor, seed=self._step_idx)
@@ -82,10 +73,9 @@ class Trainer:
         dr_image = dr_image / (dr_image + 1)
         dr_image = dr_image ** (1/2.2)
         dr_image = dr.clip(dr_image, 0, 1)
-        
-        # Compute loss using Stable Diffusion
-        loss = self.sd.compute_rdfs_loss(prompt_embedings, dr_image, dr_depth)
-        
+    
+        loss = self.compute_loss(dr_image, dr_depth, prompts)
+
         # Backward pass
         dr.backward(loss)
         self.opt.step()
@@ -98,6 +88,27 @@ class Trainer:
         self._step_idx += 1
 
         return dr_image, loss
+    
+    @dr.wrap("drjit", "torch")
+    def compute_loss(self, image: torch.Tensor, depth: torch.Tensor, prompts: list[str]) -> torch.Tensor:
+        if image.ndim == 3:
+            image = image.unsqueeze(0).permute(0, 3, 1, 2)  # Convert (H, W, C) to (1, C, H, W)
+            depth = depth.detach().unsqueeze(0).repeat(3, 1, 1).unsqueeze(0)  # Convert to (1, 3, H, W)
+        elif image.ndim == 4:
+            # Don't ask about the weird order, it's the batch sensor 
+            image = image.permute(1, 3, 0, 2)  # Convert (H, B, W, C) to (B, C, H, W)
+            depth = depth.detach().unsqueeze(-1).repeat(1, 1, 1, 3).permute(1, 3, 0, 2)  # Convert to (B, 3, H, W)
+        else:
+            raise ValueError(f"Unsupported image shape: {image.shape}")
+        
+        prompt_embedings = self.prompt_encoder.encode_prompt(
+            prompt=prompts,
+            negative_prompt=self.negative_prompt,
+            images=image,
+        )
+
+        # Compute loss using Stable Diffusion
+        return self.sd.compute_rdfs_loss(prompt_embedings, image, depth)
 
     def _azimuth_to_direction(self, azimuth: float) -> str:
         # Map azimuth quadrants to semantic prompt directions.
