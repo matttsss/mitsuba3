@@ -11,38 +11,43 @@ class StableDiffusion(Distilator):
     def __init__(self, config: dict, device: str = 'cuda', generator: torch.Generator = None, enable_offload: bool = True):
         super().__init__(generator, device, config)
         
-        # Instantiate pipeline
+        # Instantiate pipeline and extract components
         controlnet = SD3ControlNetModel.from_pretrained("InstantX/SD3-Controlnet-Depth", torch_dtype=torch.float16)
-        self.pipe = StableDiffusion3ControlNetPipeline.from_pretrained(
-            "stabilityai/stable-diffusion-3-medium-diffusers", 
-            text_encoder_3=None,tokenizer_3=None,
+        pipe = StableDiffusion3ControlNetPipeline.from_pretrained(
+            "stabilityai/stable-diffusion-3-medium-diffusers",
+            text_encoder=None, text_encoder_2=None, text_encoder_3=None,
+            tokenizer=None, tokenizer_2=None, tokenizer_3=None,
             controlnet=controlnet, torch_dtype=torch.float16
         ).to(device)
 
         if enable_offload:
-            self.pipe.enable_model_cpu_offload()
+            pipe.enable_model_cpu_offload()
 
-        # rename the model for interface in the distilator
-        self.pipe.model = self.pipe.transformer
+        # Extract components from pipeline (do not store the pipeline itself)
+        self.transformer = pipe.transformer
+        self.vae = pipe.vae
+        self.controlnet = pipe.controlnet
+        self.image_processor = pipe.image_processor
 
-        for param in self.pipe.vae.parameters():
+        self.vae_scale_factor = pipe.vae_scale_factor
+        self.num_train_steps = pipe.scheduler.config.num_train_timesteps
+
+        for param in self.vae.parameters():
             param.requires_grad_(False)
-        for param in self.pipe.controlnet.parameters():
+        for param in self.controlnet.parameters():
             param.requires_grad_(False)
-        for param in self.pipe.model.parameters():
+        for param in self.transformer.parameters():
             param.requires_grad_(False)
 
-    def cleanup_text_encoders(self):
-        del self.pipe.text_encoder
-        del self.pipe.text_encoder_2
-        del self.pipe.text_encoder_3
-        gc.collect()
-        torch.cuda.empty_cache()
+    @property
+    def model(self):
+        return self.transformer
     
     @torch.no_grad()
     def predict_velocity(self, prompt_embedings: dict[str, torch.Tensor], latents: torch.Tensor, depth: torch.Tensor, timestep):
         device = self.device
-        dtype = self.pipe.model.dtype
+        dtype = self.transformer.dtype
+
 
         do_cfg = self.config["guidance_scale"] > 1.0
         
@@ -84,8 +89,8 @@ class StableDiffusion(Distilator):
                 depth = torch.cat([depth] * 2)
 
             # Prepare depth image as controlnet conditioning (encoded to latent space)
-            controlnet_config = self.pipe.controlnet.config
-            vae_shift_factor = 0 if controlnet_config.force_zeros_for_pooled_projection else self.pipe.vae.config.shift_factor
+            controlnet_config = self.controlnet.config
+            vae_shift_factor = 0 if controlnet_config.force_zeros_for_pooled_projection else self.vae.config.shift_factor
             control_image = self.encode_image(depth, vae_shift_factor)
 
             # Controlnet pooled projections (InstantX depth controlnet uses zero projections)
@@ -99,7 +104,7 @@ class StableDiffusion(Distilator):
             )
 
             # Apply controlnet conditioning
-            control_block_samples = self.pipe.controlnet(
+            control_block_samples = self.controlnet(
                 hidden_states=latent_model_input,
                 timestep=t_expanded,
                 encoder_hidden_states=controlnet_encoder_hidden_states,
@@ -111,7 +116,7 @@ class StableDiffusion(Distilator):
             )[0]
 
         # Transformer forward pass (single denoising step)
-        velocity_pred = self.pipe.model(
+        velocity_pred = self.transformer(
             hidden_states=latent_model_input,
             timestep=t_expanded,
             encoder_hidden_states=prompt_embeds,
@@ -129,43 +134,17 @@ class StableDiffusion(Distilator):
         return velocity_pred
 
     def decode_latents(self, latents):
-        latents = latents.to(device=self.device, dtype=self.pipe.vae.dtype)
+        latents = latents.to(device=self.device, dtype=self.vae.dtype)
 
-        latents = (latents / self.pipe.vae.config.scaling_factor) + self.pipe.vae.config.shift_factor
-        image = self.pipe.vae.decode(latents).sample
+        latents = (latents / self.vae.config.scaling_factor) + self.vae.config.shift_factor
+        image = self.vae.decode(latents).sample
 
-        return self.pipe.image_processor.postprocess(image, output_type='pt')
+        return self.image_processor.postprocess(image, output_type='pt')
     
     def encode_image(self, image, vae_shift_factor=None):
-        image = image.to(device=self.device, dtype=self.pipe.vae.dtype)
-        image = self.pipe.image_processor.preprocess(image)
+        image = image.to(device=self.device, dtype=self.vae.dtype)
+        image = self.image_processor.preprocess(image)
 
-        vae_shift_factor = vae_shift_factor or self.pipe.vae.config.shift_factor
-        image = self.pipe.vae.encode(image).latent_dist.sample(generator=self.generator)
-        return (image - vae_shift_factor) * self.pipe.vae.config.scaling_factor
-    
-    @torch.no_grad()
-    def _encode_prompt(self, prompt: str, negative_prompt: str) -> dict[str, torch.Tensor]:
-        (
-            prompt_embeds,
-            negative_prompt_embeds,
-            pooled_prompt_embeds,
-            negative_pooled_prompt_embeds,
-        ) = self.pipe.encode_prompt(
-            prompt=prompt,
-            prompt_2=prompt,
-            prompt_3=prompt,
-            negative_prompt=negative_prompt,
-            negative_prompt_2=negative_prompt,
-            negative_prompt_3=negative_prompt,
-            do_classifier_free_guidance=True, # Worst case, we ignore the negative prompt results
-            device=self.device,
-        )
-
-        # Returns the precomputed parameters as a dictionary
-        return {
-            "prompt_embeds": prompt_embeds,
-            "negative_prompt_embeds": negative_prompt_embeds,
-            "pooled_prompt_embeds": pooled_prompt_embeds,
-            "negative_pooled_prompt_embeds": negative_pooled_prompt_embeds
-        }
+        vae_shift_factor = vae_shift_factor or self.vae.config.shift_factor
+        image = self.vae.encode(image).latent_dist.sample(generator=self.generator)
+        return (image - vae_shift_factor) * self.vae.config.scaling_factor

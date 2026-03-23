@@ -4,6 +4,8 @@ import torch
 
 import drjit as dr
 import mitsuba as mi
+
+from gotex.models.prompt_encoder import TextPromptEncoder
 from .models.sd import StableDiffusion
 
 class Trainer:
@@ -20,18 +22,22 @@ class Trainer:
         )
         print("Stable Diffusion model loaded.")
 
+        self.prompt_encoder = TextPromptEncoder(device=device, dtype=self.sd.transformer.dtype)
+
         self.lr = 3e-2
         self._step_idx = 0
 
         # '' is for the default prompt without directional cues
         self.directions = ('front left', 'front right', 'back left', 'back right', '')
 
-        prompt = sd_config['prompt']
-        self.dir_to_prompt_embeds = {
-            direction: self.sd._encode_prompt(f"{prompt}, {direction}", self.sd.config["negative_prompt"])
-            for direction in self.directions
+        self.prompt = self.sd.config['prompt']
+        self.negative_prompt = self.sd.config["negative_prompt"]
+        self.directional_prompts = {
+                direction: f"{self.prompt}, {direction}" for direction in self.directions
         }
-        self.sd.cleanup_text_encoders()
+
+        # Precompute and cache T5 prompt embeddings once, then free the T5 encoder.
+        self.prompt_encoder.precompute_t5_prompt_embeds(list(self.directional_prompts.values()) + [self.negative_prompt])        
 
         scene_params.keep(r'.*\.reflectance\.data')
         self.opt = mi.ad.Adam(lr=self.lr, params=scene_params)
@@ -40,11 +46,6 @@ class Trainer:
         self.opt_sensor = None
         self.opt_sensor_params = None
 
-
-    @property
-    def loss(self):
-        return self.ema_loss
-
     @property
     def step_idx(self):
         return self._step_idx
@@ -52,30 +53,23 @@ class Trainer:
     def step(self, scene: mi.Scene, scene_params: mi.SceneParameters) -> tuple[mi.TensorXf, float]:
         # Randomize camera viewpoint for 3D scenes
         if not self.camera_config['is_2d']:
-            sensor_prompts = {
-                'prompt_embeds': [],
-                'pooled_prompt_embeds': [],
-                'negative_prompt_embeds': [],
-                'negative_pooled_prompt_embeds': [],
-            }
-
+            prompts = []
             # For every sensor, sample camera dir and get it's associated prompt embeddings
             for k in self.opt_sensor_params.keys():
                 transform, direction_label = self.random_transform()
                 self.opt_sensor_params[k] = transform
 
-                for prompt_type, prompts in sensor_prompts.items():
-                    prompts.append(self.dir_to_prompt_embeds[direction_label][prompt_type])
+                prompts.append(self.directional_prompts[direction_label])
 
             self.opt_sensor_params.update()
-
-            # Stack the prompt embeddings for all sensors into a single batch
-            prompt_embedings = {
-                prompt_type: torch.cat(prompts, dim=0) for prompt_type, prompts in sensor_prompts.items()
-            }
         else:
-            # For 2D scenes, we can use the same prompt for the one sensor
-            prompt_embedings = self.dir_to_prompt_embeds['']
+            prompts = [self.prompt]  # Single prompt for 2D scenes
+
+        prompt_embedings = self.prompt_encoder.encode_prompt(
+            images=None,
+            prompt=prompts,
+            negative_prompt=self.negative_prompt
+        )
 
         # Render depth and image
         dr_depth = Trainer.get_depth(scene, sensor=self.opt_sensor)

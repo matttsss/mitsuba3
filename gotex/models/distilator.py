@@ -43,7 +43,7 @@ class Distilator:
             latents_noisy = time * noise + (1.0 - time) * latents
 
             predicted_vel = self.predict_velocity(
-                prompt_embeds, latents_noisy, depth, timestep=time * self.pipe.scheduler.config.num_train_timesteps
+                prompt_embeds, latents_noisy, depth, timestep=time * self.num_train_steps
             )
             predicted_vel = torch.nan_to_num(predicted_vel).float()  # Cast to float32 for loss computation
 
@@ -72,7 +72,7 @@ class Distilator:
                 latents_noisy = time * noise + (1.0 - time) * latents
 
                 pred_vel = self.predict_velocity(
-                    prompt_embeds, latents_noisy, depth, timestep=time * self.pipe.scheduler.config.num_train_timesteps
+                    prompt_embeds, latents_noisy, depth, timestep=time * self.num_train_steps
                 )
 
                 analytic_vel = noise - latents
@@ -95,14 +95,14 @@ class Distilator:
             latents_noisy = time * noise + (1.0 - time) * latents
 
             predicted_vel = self.predict_velocity(
-                prompt_embeds, latents_noisy, depth, timestep=time * self.pipe.scheduler.config.num_train_timesteps
+                prompt_embeds, latents_noisy, depth, timestep=time * self.num_train_steps
             )
             noise = noise + (1 - time) * (predicted_vel + latents - noise)
 
             # Back to the original RDFS loss with the optimized noise
             latents_noisy = time * noise + (1.0 - time) * latents
             predicted_vel = self.predict_velocity(
-                prompt_embeds, latents_noisy, depth, timestep=time * self.pipe.scheduler.config.num_train_timesteps
+                prompt_embeds, latents_noisy, depth, timestep=time * self.num_train_steps
             )
             predicted_vel = torch.nan_to_num(predicted_vel).float()  # Cast to float32 for loss computation
 
@@ -134,10 +134,9 @@ class Distilator:
 
     def prepare_latents(self, render_size):
         shape = (
-            1,
-            self.pipe.model.config.in_channels,
-            int(render_size // self.pipe.vae_scale_factor),
-            int(render_size // self.pipe.vae_scale_factor),
+            1, self.model.config.in_channels,
+            int(render_size // self.vae_scale_factor),
+            int(render_size // self.vae_scale_factor),
         )
 
-        return torch.randn(shape, generator=self.generator, device=self.device, dtype=self.pipe.model.dtype)
+        return torch.randn(shape, generator=self.generator, device=self.device, dtype=self.model.dtype)

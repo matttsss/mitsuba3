@@ -63,7 +63,7 @@ if __name__ == "__main__":
     parser.add_argument("--device", type=str, default="cuda", help="Torch device (e.g. cuda or cpu).")
     parser.add_argument("--render-size", type=int, default=512, help="Render resolution.")
     parser.add_argument("--lr", type=float, default=3e-2, help="Optimizer learning rate.")
-    parser.add_argument("--nb-sensors", type=int, default=6, help="Number of camera sensors for randomization.")
+    parser.add_argument("--nb-sensors", type=int, default=5, help="Number of camera sensors for randomization.")
     parser.add_argument("--nb-opt-steps", type=int, default=8000, help="Number of optimization steps.")
     parser.add_argument("--nb-steps-save", type=int, default=100, help="Save outputs every N optimization steps.")
     parser.add_argument("--disable-tqdm", action="store_true", help="Disable tqdm progress bar output.")
