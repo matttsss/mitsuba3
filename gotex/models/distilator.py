@@ -1,6 +1,8 @@
 import torch
 
 from dataclasses import dataclass
+
+import gotex.logger as logger
 from gotex.config import Configurable, RuntimeContext
 
 class Distilator(Configurable):
@@ -37,13 +39,12 @@ class Distilator(Configurable):
 
     @torch.no_grad()
     def dump_latents(self, old_latents: torch.FloatTensor, latents: torch.FloatTensor):
-        import mitsuba as mi
         img = self.decode_latents(latents).permute(0, 2, 3, 1)  # Convert to (B, H, W, C)
         old_img = self.decode_latents(old_latents).permute(0, 2, 3, 1)  # Convert to (B, H, W, C)
         
         for i in range(img.shape[0]):
-            mi.util.write_bitmap("outputs/latents_{:04d}.png".format(i), img[i])
-            mi.util.write_bitmap("outputs/old_img_{:04d}.png".format(i), old_img[i])
+            logger.save_image(img[i], f"latents_{i:04d}.png")
+            logger.save_image(old_img[i], f"old_img_{i:04d}.png")
 
     def compute_rdfs_loss(self, prompt_embeds: torch.FloatTensor, image: torch.FloatTensor, depth: torch.FloatTensor):
         latents = self.encode_image(image).float()

@@ -6,6 +6,7 @@ from tqdm.auto import trange
 import drjit as dr
 import mitsuba as mi
 
+import gotex.logger as logger
 from gotex.trainer import Trainer
 from gotex.config import ExperimentConfig, create_runtime, load_config
 
@@ -20,6 +21,7 @@ def main(args, extra):
 
     out_folder = f'{config.exp_root_dir}/{config.name}'
     os.makedirs(out_folder, exist_ok=True)
+    logger.set_out_dir(out_folder)
 
     iterator = trange(trainer.cfg.max_steps, desc="Optimizing", disable=not config.use_tqdm)
     for step_idx in iterator:
@@ -34,10 +36,10 @@ def main(args, extra):
             
             images = image.torch().permute(1, 0, 2, 3)
             for i, img in enumerate(images):
-                mi.util.write_bitmap(os.path.join(out_folder, f'render_{i}.exr'), img)
+                logger.save_image(img, f'render_{i}.exr')
 
             for k, v in trainer.opt.items():
-                mi.util.write_bitmap(os.path.join(out_folder, f'{k.split(".")[0]}.exr'), v)
+                logger.save_image(v, f'{k.split(".")[0]}.exr')
 
 
 if __name__ == "__main__":

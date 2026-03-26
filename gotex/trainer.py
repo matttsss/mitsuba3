@@ -32,6 +32,8 @@ class Trainer(Configurable):
     class CameraConfig(Configurable.Config):
         is_2d: bool = False
         nb_sensors: int = 1
+        spp: int = 16
+        fov: float = 30.0
         render_size: int = 512
         radius_min: float = 1.0
         radius_max: float = 1.0
@@ -61,9 +63,7 @@ class Trainer(Configurable):
         self.opt = mi.ad.Adam(lr=self.cfg.lr, params=self.scene_params)
         self.scene_params.update(self.opt)
 
-        self.opt_sensor = None
-        self.opt_sensor_params = None
-        self.setup_opt_sensors(self.camera_cfg.nb_sensors, self.camera_cfg.render_size)
+        self.setup_opt_sensors()
 
     @property
     def step_idx(self):
@@ -87,8 +87,8 @@ class Trainer(Configurable):
         dr_depth = Trainer.get_depth(self.scene, sensor=self.opt_sensor)
         dr_image = mi.render(self.scene, params=self.scene_params, sensor=self.opt_sensor, seed=self._step_idx)
 
-        dr_depth = dr.reshape(mi.TensorXf, dr_depth, (self.render_size, self.nb_sensors, self.render_size))
-        dr_image = dr.reshape(mi.TensorXf, dr_image, (self.render_size, self.nb_sensors, self.render_size, 3))
+        dr_depth = dr.reshape(mi.TensorXf, dr_depth, (self.camera_cfg.render_size, self.camera_cfg.nb_sensors, self.camera_cfg.render_size))
+        dr_image = dr.reshape(mi.TensorXf, dr_image, (self.camera_cfg.render_size, self.camera_cfg.nb_sensors, self.camera_cfg.render_size, 3))
 
         # Simple tone mapping for Stable Diffusion input
         dr_image = dr_image / (dr_image + 1)
@@ -131,14 +131,13 @@ class Trainer(Configurable):
         return self.guidance.compute_rdfs_loss(prompt_embedings, image, depth)
     
 
-    def setup_opt_sensors(self, nb_sensors: int, render_size: int, fov: float = 30.0):
-        self.nb_sensors = nb_sensors
-        self.render_size = render_size
+    def setup_opt_sensors(self):
 
-        if nb_sensors == 1:
+
+        if self.camera_cfg.nb_sensors == 1:
             sensor_dict = {
                 'type': 'perspective',
-                'fov': fov,
+                'fov': self.camera_cfg.fov,
                 'to_world': mi.ScalarTransform4f(),
             }
         else: 
@@ -147,9 +146,9 @@ class Trainer(Configurable):
                 **{
                     f'sensor_{i}': {
                         'type': 'perspective',
-                        'fov': fov,
+                        'fov': self.camera_cfg.fov,
                         'to_world': mi.ScalarTransform4f()
-                    } for i in range(nb_sensors)
+                    } for i in range(self.camera_cfg.nb_sensors)
                 },
             }
 
@@ -162,8 +161,8 @@ class Trainer(Configurable):
 
             'film': {
                 'type': 'hdrfilm',
-                'width' : nb_sensors * render_size,
-                'height': render_size,
+                'width' : self.camera_cfg.nb_sensors * self.camera_cfg.render_size,
+                'height': self.camera_cfg.render_size,
                 'rfilter': {
                     'type': 'gaussian',
                 },
@@ -176,9 +175,9 @@ class Trainer(Configurable):
         self.opt_sensor_params = mi.traverse(self.opt_sensor)
         self.opt_sensor_params.keep(r'.*to_world')
 
-        print(f"Using {nb_sensors} optimization sensors with render size {render_size}x{render_size} and FOV {fov} degrees.")
+        print(f"Using {self.camera_cfg.nb_sensors} optimization sensors with render size {self.camera_cfg.render_size}x{self.camera_cfg.render_size} and FOV {self.camera_cfg.fov} degrees.")
 
-    def random_transform(self, sensor_idx: int) -> tuple[mi.ScalarTransform4f, str]:
+    def random_transform(self, sensor_idx: int) -> tuple[mi.ScalarTransform4f, (float, float)]:
         if random.random() < 0.5:
                 elevation_deg = self.generator.uniform(mi.ScalarFloat, shape=1, 
                                                  low=self.camera_cfg.elevation_min, high=self.camera_cfg.elevation_max)
@@ -195,7 +194,7 @@ class Trainer(Configurable):
             # ensures sampled azimuth angles in a batch cover the whole range
             azimuth = (
                 sensor_idx + self.generator.uniform(mi.ScalarFloat, shape=1)
-            ) / self.nb_sensors * dr.two_pi
+            ) / self.camera_cfg.nb_sensors * dr.two_pi
 
         else:
             # simple random sampling
