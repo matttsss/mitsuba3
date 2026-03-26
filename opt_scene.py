@@ -8,37 +8,42 @@ from tqdm.auto import trange
 import drjit as dr
 import mitsuba as mi
 
+from gotex.models.prompt_encoder import PromptEncoder
+from gotex.utils import load_scene
+from gotex.config import ExperimentConfig, load_config
+from gotex.models.sd import StableDiffusion
 from gotex.trainer import Trainer
-from gotex.scenes.dragon_emisive import load_scene
 
 def main(args):
     random.seed(args.seed)
     device = torch.device(args.device)
+    mi.set_variant("cuda_ad_rgb" if "cuda" in args.device else "llvm_ad_rgb")
 
-    scene_config = load_scene(args.render_size)
-    camera_config = scene_config['camera_config']
-    sd_config = scene_config['sd_config']
+    config: ExperimentConfig = load_config(*args.config_files)
 
-    scene = mi.load_dict(scene_config['scene'], optimize=False)
-    scene_params: mi.SceneParameters = mi.traverse(scene)
-    
+    scene = load_scene(config.scene, config.checkpoint)
+    sd = StableDiffusion(
+        config=config.guidance,
+        device=config.device,
+    )
+    prompt_encoder = PromptEncoder(config.prompt_processor, device=device, dtype=sd.transformer.dtype)
+        
     trainer = Trainer(
-        scene_params=scene_params,
-        camera_config=camera_config,
-        sd_config=sd_config,
-        device=device,
+        config=config.trainer,
+        camera_config=config.camera,
+        scene=scene,
+        guidance=sd,
+        prompt_processor=prompt_encoder,
         seed=args.seed
     )
 
-    trainer.setup_opt_sensors(args.nb_sensors, args.render_size)
-
-    out_folder = f'outputs/{scene_config["scene_name"]}'
+    out_folder = f'{config.exp_root_dir}/{config.name}'
     os.makedirs(out_folder, exist_ok=True)
 
     iterator = trange(args.nb_opt_steps, desc="Optimizing", disable=args.disable_tqdm)
     for step_idx in iterator:
         
-        image, loss = trainer.step(scene, scene_params)            
+        image, loss = trainer.step()            
 
         if step_idx % args.nb_steps_save == 0:
             if args.disable_tqdm:
@@ -64,9 +69,9 @@ if __name__ == "__main__":
     parser.add_argument("--nb-opt-steps", type=int, default=8000, help="Number of optimization steps.")
     parser.add_argument("--nb-steps-save", type=int, default=100, help="Save outputs every N optimization steps.")
     parser.add_argument("--disable-tqdm", action="store_true", help="Disable tqdm progress bar output.")
+    
+    parser.add_argument("config_files", nargs="*", help="YAML configuration files to load.")
     args = parser.parse_args()
-
     # Set the Mitsuba variant based on the device
-    mi.set_variant("cuda_ad_rgb" if "cuda" in args.device else "llvm_ad_rgb")
 
     main(args)

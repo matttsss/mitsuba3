@@ -1,6 +1,9 @@
 import os, warnings, logging, torch
 from pathlib import Path
 
+import importlib
+import mitsuba as mi
+
 from diffusers.utils import logging as diffusers_logging
 from huggingface_hub.utils import logging as hf_hub_logging
 from transformers.utils import logging as transformers_logging
@@ -56,3 +59,29 @@ def hdr_to_sdr(img, exposure=1.0):
     )
     
     return img
+
+def load_scene(path: str | None, texture_dir_override: str | None = None):
+    """Load a custom scene with Stable Diffusion configuration"""
+    
+    # Dynamically import load_scene from the provided path
+    if path is None:
+        # Use default scene
+        from .scenes.painting import load_scene
+    else:
+        scene_path = Path(path)
+        if scene_path.suffix == '.py':
+            # It's a file path, load as module
+            spec = importlib.util.spec_from_file_location("custom_scene", scene_path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            load_scene = module.load_scene
+        else:
+            # Assume it's a module path like "scenes.painting" or "scenes.dragon"
+            path = "gotex.scenes." + path
+            module = importlib.import_module(path)
+            load_scene = module.load_scene
+        
+    scene_config = load_scene(512, texture_dir=texture_dir_override)
+    scene = mi.load_dict(scene_config['scene'], optimize=False)
+
+    return scene

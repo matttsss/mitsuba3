@@ -6,65 +6,53 @@ import random
 import drjit as dr
 import mitsuba as mi
 
-from gotex.models.prompt_encoder import PromptEncoder
-from .models.sd import StableDiffusion
+from .models.prompt_encoder import PromptEncoder
+from .models.distilator import Distilator
 
 class Trainer:
 
-    def __init__(self, scene_params: mi.SceneParameters, camera_config: dict, sd_config: dict, device: str, seed: int = 42):
+    def __init__(self, config: dict, camera_config: dict, scene: mi.Scene, guidance: Distilator, prompt_processor: PromptEncoder, seed: int):
+        self.config = config
         self.camera_config = camera_config
         self.generator = dr.rng(seed)
 
-        print("Loading Stable Diffusion model...")
-        self.sd = StableDiffusion(
-            config=sd_config,
-            device=device,
-            enable_offload=False
-        )
-        print("Stable Diffusion model loaded.")
+        self.scene = scene
+        self.scene_params: mi.SceneParameters = mi.traverse(scene)
+        self.guidance = guidance
+        self.prompt_processor = prompt_processor
 
-        self.lr = 3e-2
+        self.lr = config["lr"]
         self._step_idx = 0
 
-        self.directions = ('side', 'front', 'back', 'overhead')
-
-        self.prompt = self.sd.config['prompt']
-        self.negative_prompt = self.sd.config["negative_prompt"]
-        self.directional_prompts = {
-                direction: f"{self.prompt}, {direction}" for direction in self.directions
-        }
-        prompts = list(self.directional_prompts.values()) + [self.negative_prompt]
-        self.prompt_encoder = PromptEncoder(prompts=prompts, device=device, dtype=self.sd.transformer.dtype)
-
-        scene_params.keep(r'.*\.reflectance\.data')
-        self.opt = mi.ad.Adam(lr=self.lr, params=scene_params)
-        scene_params.update(self.opt)
+        self.scene_params.keep(r'.*\.reflectance\.data')
+        self.opt = mi.ad.Adam(lr=self.lr, params=self.scene_params)
+        self.scene_params.update(self.opt)
 
         self.opt_sensor = None
         self.opt_sensor_params = None
+        self.setup_opt_sensors(self.camera_config['nb_sensors'], self.camera_config['render_size'])
 
     @property
     def step_idx(self):
         return self._step_idx
 
-    def step(self, scene: mi.Scene, scene_params: mi.SceneParameters) -> tuple[mi.TensorXf, float]:
+    def step(self) -> tuple[mi.TensorXf, float]:
         # Randomize camera viewpoint for 3D scenes
+        camera_angles = None # If 2D
         if not self.camera_config['is_2d']:
-            prompts = []
+            camera_angles = []
             # For every sensor, sample camera dir and get it's associated prompt embeddings
             for sensor_idx, k in enumerate(self.opt_sensor_params.keys()):
-                transform, direction_label = self.random_transform(sensor_idx)
+                transform, cam_angles = self.random_transform(sensor_idx)
                 self.opt_sensor_params[k] = transform
 
-                prompts.append(self.directional_prompts[direction_label])
+                camera_angles.append(cam_angles)
 
             self.opt_sensor_params.update()
-        else:
-            prompts = [self.prompt]  # Single prompt for 2D scenes
 
         # Render depth and image
-        dr_depth = Trainer.get_depth(scene, sensor=self.opt_sensor)
-        dr_image = mi.render(scene, params=scene_params, sensor=self.opt_sensor, seed=self._step_idx)
+        dr_depth = Trainer.get_depth(self.scene, sensor=self.opt_sensor)
+        dr_image = mi.render(self.scene, params=self.scene_params, sensor=self.opt_sensor, seed=self._step_idx)
 
         dr_depth = dr.reshape(mi.TensorXf, dr_depth, (self.render_size, self.nb_sensors, self.render_size))
         dr_image = dr.reshape(mi.TensorXf, dr_image, (self.render_size, self.nb_sensors, self.render_size, 3))
@@ -74,7 +62,7 @@ class Trainer:
         dr_image = dr_image ** (1/2.2)
         # dr_image = dr.clip(dr_image, 0, 1)
     
-        loss = self.compute_loss(dr_image, dr_depth, prompts)
+        loss = self.compute_loss(dr_image, dr_depth, camera_angles)
 
         # Backward pass
         dr.backward(loss)
@@ -84,13 +72,13 @@ class Trainer:
         for k, v in self.opt.items():
             self.opt[k] = dr.clip(v, 0, 1)
         
-        scene_params.update(self.opt)
+        self.scene_params.update(self.opt)
         self._step_idx += 1
 
         return dr_image, loss
     
     @dr.wrap("drjit", "torch")
-    def compute_loss(self, image: torch.Tensor, depth: torch.Tensor, prompts: list[str]) -> torch.Tensor:
+    def compute_loss(self, image: torch.Tensor, depth: torch.Tensor, camera_angles: list[tuple[float, float]]) -> torch.Tensor:
         if image.ndim == 3:
             image = image.unsqueeze(0).permute(0, 3, 1, 2)  # Convert (H, W, C) to (1, C, H, W)
             depth = depth.detach().unsqueeze(0).repeat(3, 1, 1).unsqueeze(0)  # Convert to (1, 3, H, W)
@@ -101,25 +89,13 @@ class Trainer:
         else:
             raise ValueError(f"Unsupported image shape: {image.shape}")
         
-        prompt_embedings = self.prompt_encoder.encode_prompt(
-            prompt=prompts,
-            negative_prompt=self.negative_prompt,
+        prompt_embedings = self.prompt_processor.fetch_prompt(
+            camera_angles=camera_angles,
             images=image,
         )
 
         # Compute loss using Stable Diffusion
-        return self.sd.compute_rdfs_loss(prompt_embedings, image, depth)
-
-    def _view_to_direction(self, azimuth: float, inclination: float) -> str:
-        # Prioritize top-down views, then map azimuth to front/side/back buckets.
-        if inclination <= dr.pi / 4:
-            return 'overhead'
-
-        if -dr.pi / 4 <= azimuth < dr.pi / 4:
-            return 'front'
-        if azimuth >= 3 * dr.pi / 4 or azimuth < -3 * dr.pi / 4:
-            return 'back'
-        return 'side'
+        return self.guidance.compute_rdfs_loss(prompt_embedings, image, depth)
     
 
     def setup_opt_sensors(self, nb_sensors: int, render_size: int, fov: float = 30.0):
@@ -167,6 +143,8 @@ class Trainer:
         self.opt_sensor_params = mi.traverse(self.opt_sensor)
         self.opt_sensor_params.keep(r'.*to_world')
 
+        print(f"Using {nb_sensors} optimization sensors with render size {render_size}x{render_size} and FOV {fov} degrees.")
+
     def random_transform(self, sensor_idx: int) -> tuple[mi.ScalarTransform4f, str]:
         if random.random() < 0.5:
                 elevation_deg = self.generator.uniform(mi.ScalarFloat, shape=1, 
@@ -177,6 +155,8 @@ class Trainer:
             elev_percent_high = (self.camera_config['elevation_max'] + 90.0) / 180.0
             u = self.generator.uniform(mi.ScalarFloat, shape=1, low=elev_percent_low, high=elev_percent_high)
             elevation = dr.asin(2.0 * u - 1.0)
+        
+        elevation = 0.5 * dr.pi - elevation  # Convert to inclination
 
         if True:
             # ensures sampled azimuth angles in a batch cover the whole range
@@ -187,9 +167,6 @@ class Trainer:
         else:
             # simple random sampling
             azimuth = self.generator.uniform(mi.ScalarFloat, shape=1, low=0.0, high=dr.two_pi)
-        
-        elevation = 0.5 * dr.pi - elevation  # Convert to inclination
-        direction_label = self._view_to_direction(azimuth, elevation)
 
         camera_distances = self.generator.uniform(
             mi.ScalarFloat, shape=1, 
@@ -207,12 +184,12 @@ class Trainer:
                                             low=-camera_perturb, high=camera_perturb)
 
         center_perturb = self.camera_config['center_perturb']
-        center = self.camera_config['target'] + self.generator.normal(mi.ScalarVector3f, shape=(3,), scale=center_perturb)
+        center = mi.ScalarPoint3f(self.camera_config['target']) + self.generator.normal(mi.ScalarVector3f, shape=(3,), scale=center_perturb)
 
         up_perturb = self.camera_config['up_perturb']
         up = self.generator.normal(mi.ScalarVector3f, shape=(3,), loc=mi.ScalarVector3f(0.0, 1.0, 0.0), scale=up_perturb)
 
-        return mi.ScalarTransform4f.look_at(camera_positions, center, up), direction_label
+        return mi.ScalarTransform4f.look_at(camera_positions, center, up), (azimuth, elevation)
     
     @staticmethod
     @dr.freeze

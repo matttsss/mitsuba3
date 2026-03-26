@@ -8,7 +8,7 @@ from .distilator import Distilator
 
 class StableDiffusion(Distilator):
 
-    def __init__(self, config: dict, device: str = 'cuda', generator: torch.Generator = None, enable_offload: bool = True):
+    def __init__(self, config: dict, device: str = 'cuda', generator: torch.Generator = None):
         super().__init__(generator, device, config)
         
         # Instantiate pipeline and extract components
@@ -20,7 +20,7 @@ class StableDiffusion(Distilator):
             controlnet=controlnet, torch_dtype=torch.float16
         ).to(device)
 
-        if enable_offload:
+        if config.get("enable_offload", False):
             pipe.enable_model_cpu_offload()
 
         # Extract components from pipeline (do not store the pipeline itself)
@@ -83,7 +83,7 @@ class StableDiffusion(Distilator):
 
         # Run controlnet if enabled and depth is provided
         control_block_samples = None
-        if self.config["cn_cond_scale"] != 0.0 and depth is not None:
+        if self.config["controlnet_conditioning_scale"] != 0.0 and depth is not None:
             depth = depth.to(device=device, dtype=dtype)
 
             if do_cfg:
@@ -112,7 +112,7 @@ class StableDiffusion(Distilator):
                 pooled_projections=controlnet_pooled_projections,
                 joint_attention_kwargs=None,
                 controlnet_cond=control_image,
-                conditioning_scale=self.config["cn_cond_scale"],
+                conditioning_scale=self.config["controlnet_conditioning_scale"],
                 return_dict=False,
             )[0]
 
