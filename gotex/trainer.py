@@ -8,7 +8,7 @@ import random
 import drjit as dr
 import mitsuba as mi
 
-from gotex.config import Configurable, parse_structured
+from gotex.config import Configurable, RuntimeContext, parse_structured
 from gotex.models.sd import StableDiffusion
 
 from .models.prompt_encoder import PromptEncoder
@@ -42,15 +42,18 @@ class Trainer(Configurable):
         center_perturb: float = 0.0
         up_perturb: float = 0.0
 
-    def __init__(self, config: dict, seed: int):
-        super().__init__(config)
-        self.generator = dr.rng(seed)
+    def __init__(self, config: dict, runtime: RuntimeContext):
+        super().__init__(config, runtime=runtime)
+        self.generator = runtime.dr_generator
         self.camera_cfg = parse_structured(self.CameraConfig, self.cfg.camera)
 
         self.scene = load_scene(self.cfg.scene)
         self.scene_params: mi.SceneParameters = mi.traverse(self.scene)
-        self.guidance = StableDiffusion(self.cfg.guidance)
-        self.prompt_processor = PromptEncoder(self.cfg.prompt_processor, device=self.guidance.device, dtype=self.guidance.transformer.dtype)
+        self.guidance = StableDiffusion(self.cfg.guidance, runtime=self.runtime)
+        self.prompt_processor = PromptEncoder(
+            self.cfg.prompt_processor,
+            runtime=self.runtime,
+        )
 
         self._step_idx = 0
 

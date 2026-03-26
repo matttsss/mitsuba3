@@ -3,7 +3,7 @@ from dataclasses import dataclass
 import torch
 from diffusers import StableDiffusion3ControlNetPipeline
 
-from gotex.config import Configurable
+from gotex.config import Configurable, RuntimeContext
 
 class PromptEncoder(Configurable):
 
@@ -16,16 +16,17 @@ class PromptEncoder(Configurable):
         use_directional_prompts: bool = True
 
     """Prompt encoder that computes CLIP+T5 embeddings and caches combined prompt encodings."""
-    def __init__(self, config: dict, device: torch.device, dtype: torch.dtype):
-        super().__init__(config)
-    
-        self.device = device
-        self.dtype = dtype
+    def __init__(
+        self,
+        config: dict,
+        runtime: RuntimeContext,
+    ):
+        super().__init__(config, runtime=runtime)
 
         self.pipe = StableDiffusion3ControlNetPipeline.from_pretrained(
             self.cfg.pretrained_model_name_or_path,
-            vae=None, transformer=None, controlnet=None, torch_dtype=dtype
-        ).to(device)
+            vae=None, transformer=None, controlnet=None, torch_dtype=torch.float16
+        ).to(self.runtime.device)
         self.pipe.enable_sequential_cpu_offload()
 
         self.directions = (', side view', ', front view', ', back view', ', overhead view', '')
@@ -35,7 +36,7 @@ class PromptEncoder(Configurable):
 
 
         self.cached_prompt_encodings: dict[str, dict[str, torch.Tensor]] = {}
-        prompt_embeds, pooled_prompt_embeds = self.compute_text_prompt_encodings(prompts, device=device)
+        prompt_embeds, pooled_prompt_embeds = self.compute_text_prompt_encodings(prompts, device=self.runtime.device)
         
         for idx, prompt in enumerate(prompts):
             self.cached_prompt_encodings[prompt] = {
@@ -49,7 +50,7 @@ class PromptEncoder(Configurable):
         prompts: str | list[str],
         device: torch.device | None = None,
     ):
-        device = device or self.device
+        device = device or self.runtime.device
 
         prompt_embeds, _, pooled_prompt_embeds, _ = self.pipe.encode_prompt(
             prompts, prompts, prompts, do_classifier_free_guidance=False, device=device)
@@ -61,7 +62,7 @@ class PromptEncoder(Configurable):
         prompt: str | list[str],
         device: torch.device | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        device = device or self.device
+        device = device or self.runtime.device
         prompt_list = [prompt] if isinstance(prompt, str) else prompt
 
         missing = [p for p in prompt_list if p not in self.cached_prompt_encodings]
@@ -100,7 +101,7 @@ class PromptEncoder(Configurable):
         device: torch.device | None = "cuda",
         do_classifier_free_guidance: bool = True,
     ):
-        device = device or self.device
+        device = device or self.runtime.device
 
         if camera_angles is None:
             prompt_embeds, pooled_prompt_embeds = self._lookup_cached_prompt_encodings(

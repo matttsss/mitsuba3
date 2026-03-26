@@ -3,10 +3,10 @@ from __future__ import annotations
 import mitsuba as mi
 from ..utils import resolve_texture_filename
 
-def load_scene(render_size: int = 1024, texture_dir: str | None = None) -> tuple[mi.Scene, mi.SceneParameters, dict, dict]:
+def load_scene(texture_dir: str | None = None) -> dict:
     T = mi.ScalarTransform4f
 
-    scene_dict = {
+    return {
         'type': 'scene',
         'integrator': {
             'type': 'direct',
@@ -28,8 +28,8 @@ def load_scene(render_size: int = 1024, texture_dir: str | None = None) -> tuple
             },
             'film': {
                 'type': 'hdrfilm',
-                'width' : render_size,
-                'height': render_size,
+                'width' : 1024,
+                'height': 1024,
                 'rfilter': {
                     'type': 'gaussian',
                 },
@@ -68,22 +68,3 @@ def load_scene(render_size: int = 1024, texture_dir: str | None = None) -> tuple
             }
         },
     }
-    
-    scene_config = {
-        'scene_name': 'painting',
-        'scene': scene_dict,
-        'camera_config': {
-            'is_2d': True,
-        },
-        'sd_config': {
-            'prompt': "A DSLR image of a hamburger",
-            'negative_prompt': "",
-            'cn_cond_scale': 0.0,
-            'render_size': render_size,
-            'guidance_scale': 50.0,
-            'min_time': 0.02,
-            'max_time': 0.98
-        },
-    }
-
-    return scene_config

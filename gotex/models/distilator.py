@@ -1,7 +1,7 @@
 import torch
 
 from dataclasses import dataclass
-from gotex.config import Configurable
+from gotex.config import Configurable, RuntimeContext
 
 class Distilator(Configurable):
 
@@ -15,10 +15,11 @@ class Distilator(Configurable):
 
     cfg: Config
 
-    def __init__(self, config: dict, generator: torch.Generator, device: torch.device):
-        super().__init__(config)
-        self.generator = generator
-        self.device = device
+    def __init__(self,
+        config: dict,
+        runtime: RuntimeContext | None = None,
+    ):
+        super().__init__(config, runtime=runtime)
 
     
     def encode_image(self, image: torch.FloatTensor) -> torch.FloatTensor:
@@ -48,10 +49,10 @@ class Distilator(Configurable):
         latents = self.encode_image(image).float()
 
         with torch.no_grad():
-            time = torch.rand(1, generator=self.generator, device=self.device) 
+            time = torch.rand(1, generator=self.runtime.torch_generator, device=self.runtime.device) 
             time = time * (self.cfg.max_time - self.cfg.min_time) + self.cfg.min_time
             
-            noise = torch.randn_like(latents, generator=self.generator, device=self.device)
+            noise = torch.randn_like(latents, generator=self.runtime.torch_generator, device=self.runtime.device)
             latents_noisy = time * noise + (1.0 - time) * latents
 
             predicted_vel = self.predict_velocity(
@@ -77,10 +78,10 @@ class Distilator(Configurable):
 
         with torch.no_grad():
             for _ in range(nb_sub_steps):
-                time = torch.rand(1, generator=self.generator, device=self.device)
+                time = torch.rand(1, generator=self.runtime.torch_generator, device=self.runtime.device)
                 time = time * (self.cfg.max_time - self.cfg.min_time) + self.cfg.min_time
 
-                noise = torch.randn_like(latents, generator=self.generator, device=self.device)
+                noise = torch.randn_like(latents, generator=self.runtime.torch_generator, device=self.runtime.device)
 
                 latents_noisy = time * noise + (1.0 - time) * latents
 
@@ -102,11 +103,11 @@ class Distilator(Configurable):
         latents = self.encode_image(image).float()
 
         with torch.no_grad():
-            time = torch.rand(1, generator=self.generator, device=self.device)
+            time = torch.rand(1, generator=self.runtime.torch_generator, device=self.runtime.device)
             time = time * (self.cfg.max_time - self.cfg.min_time) + self.cfg.min_time
 
             # Sample noise and do a one step optimization of the noise
-            noise = torch.randn_like(latents, generator=self.generator, device=self.device)
+            noise = torch.randn_like(latents, generator=self.runtime.torch_generator, device=self.runtime.device)
             latents_noisy = time * noise + (1.0 - time) * latents
 
             predicted_vel = self.predict_velocity(
@@ -130,4 +131,4 @@ class Distilator(Configurable):
             int(render_size // self.vae_scale_factor),
         )
 
-        return torch.randn(shape, generator=self.generator, device=self.device, dtype=self.model.dtype)
+        return torch.randn(shape, generator=self.runtime.torch_generator, device=self.runtime.device, dtype=self.model.dtype)

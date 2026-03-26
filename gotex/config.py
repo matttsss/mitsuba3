@@ -1,9 +1,13 @@
 # File strongly inspired by the threestudio codebase
 
-import os
+import os, random
 from dataclasses import dataclass, field
 
 from omegaconf import OmegaConf, DictConfig
+
+import torch
+import drjit as dr
+import mitsuba as mi
 
 from typing import Any, Optional, Union
 
@@ -50,6 +54,7 @@ class ExperimentConfig:
     seed: int = 0
     device: str = "cuda"
 
+    use_tqdm: bool = True
     exp_root_dir: str = "outputs"
 
     checkpoint: Optional[str] = None
@@ -63,14 +68,42 @@ class ExperimentConfig:
     trainer: dict = field(default_factory=dict)
 
 
+@dataclass
+class RuntimeContext:
+    seed: int
+    device: torch.device
+    dr_generator: dr.random.Generator
+    torch_generator: torch.Generator
+
+
+def create_runtime(seed: int, device: str) -> RuntimeContext:
+    torch_device = torch.device(device)
+    mi.set_variant("cuda_ad_rgb" if "cuda" in device else "llvm_ad_rgb")
+
+
+    random.seed(seed)
+    torch.manual_seed(seed)
+    if torch_device.type == "cuda" and torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+    torch_generator = torch.Generator(device=torch_device.type).manual_seed(seed)
+    dr_generator = dr.rng(seed)
+    return RuntimeContext(
+        seed=seed, device=torch_device, 
+        torch_generator=torch_generator, 
+        dr_generator=dr_generator
+    )
+
+
 class Configurable:
     @dataclass
     class Config:
         pass
 
-    def __init__(self, cfg: Optional[dict] = None) -> None:
-        super().__init__()         
+    def __init__(self, cfg: Optional[dict] = None, runtime: Optional[RuntimeContext] = None) -> None:
+        super().__init__()
         self.cfg = parse_structured(self.Config, cfg)
+        self.runtime = runtime
 
 
 def load_config(*yamls: str, cli_args: list = [], from_string=False, **kwargs) -> Any:

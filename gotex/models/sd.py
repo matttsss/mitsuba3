@@ -5,6 +5,7 @@ import torch
 from diffusers.models import SD3ControlNetModel
 from diffusers import StableDiffusion3ControlNetPipeline
 
+from gotex.config import RuntimeContext
 from .distilator import Distilator
 
 class StableDiffusion(Distilator):
@@ -16,8 +17,12 @@ class StableDiffusion(Distilator):
 
     cfg: Config
 
-    def __init__(self, config: dict, device: str = 'cuda', generator: torch.Generator = None):
-        super().__init__(config, generator, device)
+    def __init__(
+        self,
+        config: dict,
+        runtime: RuntimeContext
+    ):
+        super().__init__(config, runtime=runtime)
         
         # Instantiate pipeline and extract components
         controlnet = SD3ControlNetModel.from_pretrained("InstantX/SD3-Controlnet-Depth", torch_dtype=torch.float16)
@@ -26,7 +31,7 @@ class StableDiffusion(Distilator):
             text_encoder=None, text_encoder_2=None, text_encoder_3=None,
             tokenizer=None, tokenizer_2=None, tokenizer_3=None,
             controlnet=controlnet, torch_dtype=torch.float16
-        ).to(device)
+        ).to(self.runtime.device)
 
         if self.cfg.enable_offload:
             pipe.enable_model_cpu_offload()
@@ -54,7 +59,7 @@ class StableDiffusion(Distilator):
     
     @torch.no_grad()
     def predict_velocity(self, prompt_embedings: dict[str, torch.Tensor], latents: torch.Tensor, depth: torch.Tensor, timestep):
-        device = self.device
+        device = self.runtime.device
         dtype = self.transformer.dtype
 
 
@@ -143,7 +148,7 @@ class StableDiffusion(Distilator):
         return velocity_pred
 
     def decode_latents(self, latents):
-        latents = latents.to(device=self.device, dtype=self.vae.dtype)
+        latents = latents.to(device=self.runtime.device, dtype=self.vae.dtype)
 
         latents = (latents / self.vae.config.scaling_factor) + self.vae.config.shift_factor
         image = self.vae.decode(latents).sample
@@ -151,9 +156,9 @@ class StableDiffusion(Distilator):
         return self.image_processor.postprocess(image, output_type='pt')
     
     def encode_image(self, image, vae_shift_factor=None):
-        image = image.to(device=self.device, dtype=self.vae.dtype)
+        image = image.to(device=self.runtime.device, dtype=self.vae.dtype)
         image = self.image_processor.preprocess(image)
 
         vae_shift_factor = vae_shift_factor or self.vae.config.shift_factor
-        image = self.vae.encode(image).latent_dist.sample(generator=self.generator)
+        image = self.vae.encode(image).latent_dist.sample(generator=self.runtime.torch_generator)
         return (image - vae_shift_factor) * self.vae.config.scaling_factor

@@ -81,7 +81,7 @@ def load_scene(path: str | None, texture_dir_override: str | None = None):
             module = importlib.import_module(path)
             load_scene = module.load_scene
         
-    scene_config = load_scene(512, texture_dir=texture_dir_override)
-    scene = mi.load_dict(scene_config['scene'], optimize=False)
+    scene_config = load_scene(texture_dir=texture_dir_override)
+    scene = mi.load_dict(scene_config, optimize=False)
 
     return scene

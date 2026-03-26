@@ -1,35 +1,10 @@
 from __future__ import annotations
 
-import numpy as np
 import mitsuba as mi
 
 from ..utils import resolve_texture_filename
 
-def list_to_mat4f(lst: list[float]) -> mi.ScalarTransform4f:
-    assert len(lst) == 16, "List must have 16 elements to convert to a 4x4 matrix"
-
-    mat = np.array(lst, dtype=np.float32).reshape((4, 4))
-    return mi.ScalarTransform4f(mat)
-    
-
-def get_light(to_world: mi.ScalarTransform4f) -> dict:
-    return {
-        'type': 'rectangle',
-        'bsdf': {
-            'type': 'diffuse',
-            'reflectance': {
-                'type': 'rgb',
-                'value': [0.0, 0.0, 0.0]
-            }
-        },
-        'emitter': {
-            'type': 'area',
-            'radiance': 2.0
-        },
-        'to_world': to_world
-    }
-
-def load_scene(render_size: int = 1024, texture_dir: str | None = None) -> tuple[mi.Scene, mi.SceneParameters, dict, dict]:
+def load_scene(texture_dir: str | None = None) -> dict:
     T = mi.ScalarTransform4f
 
     glass_bsdf = {
@@ -59,7 +34,7 @@ def load_scene(render_size: int = 1024, texture_dir: str | None = None) -> tuple
         }
     }
 
-    scene_dict = {
+    return {
         'type': 'scene',
         'integrator': {
             'type': 'prb',
@@ -81,8 +56,8 @@ def load_scene(render_size: int = 1024, texture_dir: str | None = None) -> tuple
             },
             'film': {
                 'type': 'hdrfilm',
-                'width' : render_size,
-                'height': render_size,
+                'width' : 1024,
+                'height': 1024,
                 'rfilter': {
                     'type': 'gaussian',
                 },
@@ -90,24 +65,6 @@ def load_scene(render_size: int = 1024, texture_dir: str | None = None) -> tuple
                 'component_format': 'float32',
             }
         },
-        # -------------------- Light --------------------
-        # 'light1': get_light(list_to_mat4f([
-        #     0.0813859, -3.42425e-009, 0.0783378, -0.277923, 
-        #     1.31768e-008, -0.224422, -1.25677e-008, 0.225271, 
-        #     0.174532, 1.85401e-008, -0.0365296, 0.163724, 
-        #     0, 0, 0, 1])),
-
-        # 'light2': get_light(list_to_mat4f([
-        #     -9.80906e-009, 0.00227401, -0.0820026, 0.322947, 
-        #     0.224423, 1.56693e-016, -3.58473e-009, 0.25176, 
-        #     -1.22092e-010, -0.182697, -0.00102068, 0.046278, 
-        #     0, 0, 0, 1])),
-
-        # 'light3': get_light(list_to_mat4f([
-        #     -0.230128, -6.99084e-016, 1.59932e-008, 0, 
-        #     -3.47484e-008, 4.62982e-009, -0.105918, 0.50385, 
-        #     0, -0.230128, -1.00592e-008, 0.0372435, 
-        #     0, 0, 0, 1])),
 
         'background': {
             'type': 'constant',
@@ -206,32 +163,4 @@ def load_scene(render_size: int = 1024, texture_dir: str | None = None) -> tuple
 
             }
         },
-    }
-
-    return {
-        'scene_name': 'coffee_maker',
-        'scene': scene_dict,
-
-        'camera_config': {
-            'is_2d': False,
-            'target': mi.ScalarPoint3f(0, 0.2, 0),
-            'radius_min': 0.8,
-            'radius_max': 1.2,
-            'elevation_min': 0,
-            'elevation_max': 75,
-
-            'camera_perturb': 0.005,
-            'center_perturb': 0.01,
-            'up_perturb': 0.002
-        },
-
-        'sd_config': {
-            'prompt': "A photo of a coffee maker, with a yellow casing, metal pipes and support, a glass bowl",
-            'negative_prompt': "",
-            'cn_cond_scale': 0.6,
-            'render_size': render_size,
-            'guidance_scale': 50.0,
-            'min_time': 0.02,
-            'max_time': 0.98
-        }
     }
