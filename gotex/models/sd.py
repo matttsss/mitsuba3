@@ -1,26 +1,34 @@
-import gc
+from dataclasses import dataclass
 
 import torch
-from diffusers import StableDiffusion3ControlNetPipeline
+
 from diffusers.models import SD3ControlNetModel
+from diffusers import StableDiffusion3ControlNetPipeline
 
 from .distilator import Distilator
 
 class StableDiffusion(Distilator):
 
+    @dataclass
+    class Config(Distilator.Config):
+        pretrained_model_name_or_path: str = "stabilityai/stable-diffusion-3-medium-diffusers"
+        controlnet_conditioning_scale: float = 1.0
+
+    cfg: Config
+
     def __init__(self, config: dict, device: str = 'cuda', generator: torch.Generator = None):
-        super().__init__(generator, device, config)
+        super().__init__(config, generator, device)
         
         # Instantiate pipeline and extract components
         controlnet = SD3ControlNetModel.from_pretrained("InstantX/SD3-Controlnet-Depth", torch_dtype=torch.float16)
         pipe = StableDiffusion3ControlNetPipeline.from_pretrained(
-            "stabilityai/stable-diffusion-3-medium-diffusers",
+            self.cfg.pretrained_model_name_or_path,
             text_encoder=None, text_encoder_2=None, text_encoder_3=None,
             tokenizer=None, tokenizer_2=None, tokenizer_3=None,
             controlnet=controlnet, torch_dtype=torch.float16
         ).to(device)
 
-        if config.get("enable_offload", False):
+        if self.cfg.enable_offload:
             pipe.enable_model_cpu_offload()
 
         # Extract components from pipeline (do not store the pipeline itself)
@@ -50,7 +58,7 @@ class StableDiffusion(Distilator):
         dtype = self.transformer.dtype
 
 
-        do_cfg = self.config["guidance_scale"] > 1.0
+        do_cfg = self.cfg.guidance_scale > 1.0
         
         prompt_embeds = prompt_embedings["prompt_embeds"]
         pooled_prompt_embeds = prompt_embedings["pooled_prompt_embeds"]
@@ -83,7 +91,7 @@ class StableDiffusion(Distilator):
 
         # Run controlnet if enabled and depth is provided
         control_block_samples = None
-        if self.config["controlnet_conditioning_scale"] != 0.0 and depth is not None:
+        if self.cfg.controlnet_conditioning_scale != 0.0 and depth is not None:
             depth = depth.to(device=device, dtype=dtype)
 
             if do_cfg:
@@ -112,7 +120,7 @@ class StableDiffusion(Distilator):
                 pooled_projections=controlnet_pooled_projections,
                 joint_attention_kwargs=None,
                 controlnet_cond=control_image,
-                conditioning_scale=self.config["controlnet_conditioning_scale"],
+                conditioning_scale=self.cfg.controlnet_conditioning_scale,
                 return_dict=False,
             )[0]
 
@@ -130,7 +138,7 @@ class StableDiffusion(Distilator):
         # Classifier-free guidance
         if do_cfg:
             velocity_pred_uncond, velocity_pred_text = velocity_pred.chunk(2)
-            velocity_pred = velocity_pred_uncond + self.config["guidance_scale"] * (velocity_pred_text - velocity_pred_uncond)
+            velocity_pred = velocity_pred_uncond + self.cfg.guidance_scale * (velocity_pred_text - velocity_pred_uncond)
 
         return velocity_pred
 

@@ -1,6 +1,5 @@
-import gc
-
 import torch
+
 from diffusers import ControlNetModel
 from diffusers.pipelines import StableDiffusionControlNetPipeline
 from diffusers.schedulers import FlowMatchEulerDiscreteScheduler
@@ -8,13 +7,17 @@ from diffusers.schedulers import FlowMatchEulerDiscreteScheduler
 from .distilator import Distilator
 
 class Instaflow(Distilator):
+
+    class Config(Distilator.Config):
+        pretrained_model_name_or_path: str = "XCLiu/instaflow_0_9B_from_sd_1_5"
+        controlnet_conditioning_scale: float = 0.5
+        render_size: int = 512
    
     def __init__(self, 
                  config: dict, device: str = 'cuda',
                  instaflow: bool = False, 
-                 generator: torch.Generator = None, 
-                 enable_offload: bool = True):
-        super().__init__(generator, device, config)
+                 generator: torch.Generator = None):
+        super().__init__(config, generator, device)
 
         controlnet = ControlNetModel.from_pretrained(
             "lllyasviel/control_v11f1p_sd15_depth", 
@@ -22,37 +25,14 @@ class Instaflow(Distilator):
         )
         self.pipe = StableDiffusionControlNetPipeline.from_pretrained(
             "XCLiu/instaflow_0_9B_from_sd_1_5" if instaflow else "XCLiu/2_rectified_flow_from_sd_1_5", 
-            controlnet=controlnet, 
-            safety_checker=None,
-            torch_dtype=torch.float16
+            controlnet=controlnet, text_encoder=None, tokenizer=None,
+            safety_checker=None, torch_dtype=torch.float16
         ).to(device)
-
-        self.pipe.model = self.pipe.unet
-        del self.pipe.unet
 
         self.pipe.scheduler = FlowMatchEulerDiscreteScheduler(num_train_timesteps=self.pipe.scheduler.config.num_train_timesteps)
 
-        if enable_offload:
+        if self.cfg.enable_offload:
             self.pipe.enable_model_cpu_offload()
-
-        with torch.no_grad():
-            (
-                prompt_embeds,
-                negative_prompt_embeds
-            ) = self.pipe.encode_prompt(
-                prompt=self.config["prompt"],
-                negative_prompt=self.config["negative_prompt"],
-                do_classifier_free_guidance=True, # Worst case, negative prompt_embeds are not used
-                num_images_per_prompt=1,
-                device=self.device,
-            )
-            self.config["prompt_embeds"] = prompt_embeds
-            self.config["negative_prompt_embeds"] = negative_prompt_embeds
-
-        # Cleanup text encoders
-        del self.pipe.text_encoder
-        gc.collect()
-        torch.cuda.empty_cache()
 
         for param in self.pipe.vae.parameters():
             param.requires_grad_(False)
@@ -61,6 +41,9 @@ class Instaflow(Distilator):
         for param in self.pipe.model.parameters():
             param.requires_grad_(False)
 
+    @property
+    def model(self):
+        return self.pipe.unet
 
     @torch.no_grad()
     def predict_velocity(
@@ -72,12 +55,12 @@ class Instaflow(Distilator):
         device = self.device
         dtype = self.pipe.model.dtype
 
-        do_cfg = self.config["guidance_scale"] > 1.0
+        do_cfg = self.cfg.guidance_scale > 1.0
 
         if do_cfg:
-            prompt_embedings = torch.cat([self.config["negative_prompt_embeds"], self.config["prompt_embeds"]])
+            prompt_embedings = torch.cat([self.cfg["negative_prompt_embeds"], self.cfg["prompt_embeds"]])
         else:
-            prompt_embedings = self.config["prompt_embeds"]
+            prompt_embedings = self.cfg["prompt_embeds"]
  
         # Expand inputs along batch dimension for classifier-free guidance
         latents = latents.to(device=device, dtype=dtype)
@@ -85,12 +68,12 @@ class Instaflow(Distilator):
 
         # Run controlnet if enabled and depth is provided
         down_block_res_samples, mid_block_res_sample = None, None
-        if self.config["cn_cond_scale"] != 0.0 and depth is not None:
+        if self.cfg.controlnet_conditioning_scale != 0.0 and depth is not None:
             depth = depth.to(device=device, dtype=dtype)
 
             # Prepare depth image as controlnet conditioning (encoded to latent space)
             depth = self.pipe.control_image_processor.preprocess(depth, 
-                            height=self.config["render_size"], width=self.config["render_size"]
+                            height=self.cfg.render_size, width=self.cfg.render_size
                     )
 
             down_block_res_samples, mid_block_res_sample = self.pipe.controlnet(
@@ -98,7 +81,7 @@ class Instaflow(Distilator):
                 timestep,
                 encoder_hidden_states=prompt_embedings,
                 controlnet_cond=depth,
-                conditioning_scale=self.config["cn_cond_scale"],
+                conditioning_scale=self.cfg.controlnet_conditioning_scale,
                 guess_mode=False,
                 return_dict=False,
             )
@@ -114,7 +97,7 @@ class Instaflow(Distilator):
 
         if do_cfg:
             velocity_pred_text, velocity_pred_uncond = velocity_pred.chunk(2)
-            velocity_pred = velocity_pred_uncond + self.config["guidance_scale"] * (
+            velocity_pred = velocity_pred_uncond + self.cfg.guidance_scale * (
                 velocity_pred_text - velocity_pred_uncond
             )
 
@@ -122,7 +105,7 @@ class Instaflow(Distilator):
 
     def encode_image(self, image: torch.FloatTensor):
         image = self.pipe.image_processor.preprocess(image, 
-                            height=self.config["render_size"], width=self.config["render_size"]
+                            height=self.cfg.render_size, width=self.cfg.render_size
             )
         image = image.to(device=self.device, dtype=self.pipe.vae.dtype)
 

@@ -1,8 +1,7 @@
 # File strongly inspired by the threestudio codebase
 
-import os, warnings
+import os
 from dataclasses import dataclass, field
-from datetime import datetime
 
 from omegaconf import OmegaConf, DictConfig
 
@@ -62,6 +61,16 @@ class ExperimentConfig:
     guidance: dict = field(default_factory=dict)
 
     trainer: dict = field(default_factory=dict)
+
+
+class Configurable:
+    @dataclass
+    class Config:
+        pass
+
+    def __init__(self, cfg: Optional[dict] = None) -> None:
+        super().__init__()         
+        self.cfg = parse_structured(self.Config, cfg)
 
 
 def load_config(*yamls: str, cli_args: list = [], from_string=False, **kwargs) -> Any:

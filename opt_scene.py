@@ -8,10 +8,7 @@ from tqdm.auto import trange
 import drjit as dr
 import mitsuba as mi
 
-from gotex.models.prompt_encoder import PromptEncoder
-from gotex.utils import load_scene
 from gotex.config import ExperimentConfig, load_config
-from gotex.models.sd import StableDiffusion
 from gotex.trainer import Trainer
 
 def main(args):
@@ -21,19 +18,8 @@ def main(args):
 
     config: ExperimentConfig = load_config(*args.config_files)
 
-    scene = load_scene(config.scene, config.checkpoint)
-    sd = StableDiffusion(
-        config=config.guidance,
-        device=config.device,
-    )
-    prompt_encoder = PromptEncoder(config.prompt_processor, device=device, dtype=sd.transformer.dtype)
-        
     trainer = Trainer(
         config=config.trainer,
-        camera_config=config.camera,
-        scene=scene,
-        guidance=sd,
-        prompt_processor=prompt_encoder,
         seed=args.seed
     )
 

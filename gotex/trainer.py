@@ -1,36 +1,66 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+
 import torch
 import random
 
 import drjit as dr
 import mitsuba as mi
 
+from gotex.config import Configurable, parse_structured
+from gotex.models.sd import StableDiffusion
+
 from .models.prompt_encoder import PromptEncoder
-from .models.distilator import Distilator
+from .utils import load_scene
 
-class Trainer:
+class Trainer(Configurable):
 
-    def __init__(self, config: dict, camera_config: dict, scene: mi.Scene, guidance: Distilator, prompt_processor: PromptEncoder, seed: int):
-        self.config = config
-        self.camera_config = camera_config
+    @dataclass
+    class Config(Configurable.Config):
+        lr: float = 0.01
+        max_steps: int = 1500
+        save_every: int = 50
+        opt_param_names: list[str]= field(default_factory=lambda: [r'.*\.reflectance\.data'])
+
+        scene: str = ""
+        guidance: dict = field(default_factory=dict)
+        camera: dict = field(default_factory=dict)
+        prompt_processor: dict = field(default_factory=dict)
+
+    @dataclass
+    class CameraConfig(Configurable.Config):
+        is_2d: bool = False
+        nb_sensors: int = 1
+        render_size: int = 512
+        radius_min: float = 1.0
+        radius_max: float = 1.0
+        elevation_min: float = -5.0
+        elevation_max: float = 45.0
+        target: tuple[float, float, float] = (0.0, 0.0, 0.0)
+        camera_perturb: float = 0.0
+        center_perturb: float = 0.0
+        up_perturb: float = 0.0
+
+    def __init__(self, config: dict, seed: int):
+        super().__init__(config)
         self.generator = dr.rng(seed)
+        self.camera_cfg = parse_structured(self.CameraConfig, self.cfg.camera)
 
-        self.scene = scene
-        self.scene_params: mi.SceneParameters = mi.traverse(scene)
-        self.guidance = guidance
-        self.prompt_processor = prompt_processor
+        self.scene = load_scene(self.cfg.scene)
+        self.scene_params: mi.SceneParameters = mi.traverse(self.scene)
+        self.guidance = StableDiffusion(self.cfg.guidance)
+        self.prompt_processor = PromptEncoder(self.cfg.prompt_processor, device=self.guidance.device, dtype=self.guidance.transformer.dtype)
 
-        self.lr = config["lr"]
         self._step_idx = 0
 
-        self.scene_params.keep(r'.*\.reflectance\.data')
-        self.opt = mi.ad.Adam(lr=self.lr, params=self.scene_params)
+        self.scene_params.keep(list(self.cfg.opt_param_names))
+        self.opt = mi.ad.Adam(lr=self.cfg.lr, params=self.scene_params)
         self.scene_params.update(self.opt)
 
         self.opt_sensor = None
         self.opt_sensor_params = None
-        self.setup_opt_sensors(self.camera_config['nb_sensors'], self.camera_config['render_size'])
+        self.setup_opt_sensors(self.camera_cfg.nb_sensors, self.camera_cfg.render_size)
 
     @property
     def step_idx(self):
@@ -39,7 +69,7 @@ class Trainer:
     def step(self) -> tuple[mi.TensorXf, float]:
         # Randomize camera viewpoint for 3D scenes
         camera_angles = None # If 2D
-        if not self.camera_config['is_2d']:
+        if not self.camera_cfg.is_2d:
             camera_angles = []
             # For every sensor, sample camera dir and get it's associated prompt embeddings
             for sensor_idx, k in enumerate(self.opt_sensor_params.keys()):
@@ -148,11 +178,11 @@ class Trainer:
     def random_transform(self, sensor_idx: int) -> tuple[mi.ScalarTransform4f, str]:
         if random.random() < 0.5:
                 elevation_deg = self.generator.uniform(mi.ScalarFloat, shape=1, 
-                                                 low=self.camera_config['elevation_min'], high=self.camera_config['elevation_max'])
+                                                 low=self.camera_cfg.elevation_min, high=self.camera_cfg.elevation_max)
                 elevation = dr.deg2rad(elevation_deg)
         else:
-            elev_percent_low = (self.camera_config['elevation_min'] + 90.0) / 180.0
-            elev_percent_high = (self.camera_config['elevation_max'] + 90.0) / 180.0
+            elev_percent_low = (self.camera_cfg.elevation_min + 90.0) / 180.0
+            elev_percent_high = (self.camera_cfg.elevation_max + 90.0) / 180.0
             u = self.generator.uniform(mi.ScalarFloat, shape=1, low=elev_percent_low, high=elev_percent_high)
             elevation = dr.asin(2.0 * u - 1.0)
         
@@ -170,10 +200,10 @@ class Trainer:
 
         camera_distances = self.generator.uniform(
             mi.ScalarFloat, shape=1, 
-            low=self.camera_config['radius_min'], high=self.camera_config['radius_max']
+            low=self.camera_cfg.radius_min, high=self.camera_cfg.radius_max
         )
 
-        camera_perturb = self.camera_config['camera_perturb']
+        camera_perturb = self.camera_cfg.camera_perturb
 
         st, ct = dr.sincos(elevation)
         sp, cp = dr.sincos(azimuth)
@@ -183,10 +213,10 @@ class Trainer:
         camera_positions += self.generator.uniform(mi.ScalarVector3f, shape=(3,), 
                                             low=-camera_perturb, high=camera_perturb)
 
-        center_perturb = self.camera_config['center_perturb']
-        center = mi.ScalarPoint3f(self.camera_config['target']) + self.generator.normal(mi.ScalarVector3f, shape=(3,), scale=center_perturb)
+        center_perturb = self.camera_cfg.center_perturb
+        center = mi.ScalarPoint3f(self.camera_cfg.target) + self.generator.normal(mi.ScalarVector3f, shape=(3,), scale=center_perturb)
 
-        up_perturb = self.camera_config['up_perturb']
+        up_perturb = self.camera_cfg.up_perturb
         up = self.generator.normal(mi.ScalarVector3f, shape=(3,), loc=mi.ScalarVector3f(0.0, 1.0, 0.0), scale=up_perturb)
 
         return mi.ScalarTransform4f.look_at(camera_positions, center, up), (azimuth, elevation)

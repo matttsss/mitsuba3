@@ -3,42 +3,44 @@ exp_root_dir: "outputs"
 seed: 0
 device: "cuda"
 
-scene: "dragon"
-
-camera:
-  is_2d: false
-
-  nb_sensors: 5
-  render_size: 512
-
-  target: [0, 7, 0]
-  radius_min: 55.0
-  radius_max: 65.0
-  elevation_min: -10.0
-  elevation_max: 60.0
-
-  camera_perturb: 0.05
-  center_perturb: 0.1
-  up_perturb: 0.02
-
-prompt_processor:
-  pretrained_model_name_or_path: "stabilityai/stable-diffusion-3-medium-diffusers"
-  
-  use_directional_prompts: true
-
-  prompt: "A photo of a blue dragon on a plain white piedestal, wings deployed above his head"
-  negative_prompt: "unrealistic, blurry, low quality, oversaturation."
-
-guidance:
-  pretrained_model_name_or_path: "stabilityai/stable-diffusion-3-medium-diffusers"
-  
-  controlnet_conditioning_scale: 0.0
-  guidance_scale: 100
-
-  min_time: 0.3
-  max_time: 0.98
-
 trainer:
+  scene: "dragon"
+
   lr: 3e-2
+  opt_param_names: ['.*\.reflectance\.data']
+
   max_steps: 1500
-  save_interval: 50
+  save_every: 50
+
+  camera:
+    is_2d: false
+
+    nb_sensors: 5
+    render_size: 512
+
+    target: [0, 7, 0]
+    radius_min: 55.0
+    radius_max: 65.0
+    elevation_min: -10.0
+    elevation_max: 60.0
+
+    camera_perturb: 0.05
+    center_perturb: 0.1
+    up_perturb: 0.02
+
+  prompt_processor:
+    pretrained_model_name_or_path: "stabilityai/stable-diffusion-3-medium-diffusers"
+    
+    use_directional_prompts: true
+
+    prompt: "A photo of a blue dragon on a plain white piedestal, wings deployed above his head"
+    negative_prompt: "unrealistic, blurry, low quality, oversaturation."
+
+  guidance:
+    pretrained_model_name_or_path: "stabilityai/stable-diffusion-3-medium-diffusers"
+    
+    controlnet_conditioning_scale: 0.0
+    guidance_scale: 100
+
+    min_time: 0.3
+    max_time: 0.98

@@ -1,14 +1,24 @@
 import torch
 
-import drjit as dr
+from dataclasses import dataclass
+from gotex.config import Configurable
+
+class Distilator(Configurable):
+
+    @dataclass
+    class Config(Configurable.Config):
+        min_time: float = 0.0
+        max_time: float = 1.0
+        guidance_scale: float = 7.5
+        enable_offload: bool = False
 
 
-class Distilator:
+    cfg: Config
 
-    def __init__(self, generator: torch.Generator, device: torch.device, config):
+    def __init__(self, config: dict, generator: torch.Generator, device: torch.device):
+        super().__init__(config)
         self.generator = generator
         self.device = device
-        self.config = config
 
     
     def encode_image(self, image: torch.FloatTensor) -> torch.FloatTensor:
@@ -21,8 +31,8 @@ class Distilator:
         raise NotImplementedError
     
     def set_min_max_time(self, min_time: float, max_time: float):
-        self.config["min_time"] = min_time
-        self.config["max_time"] = max_time
+        self.cfg.min_time = min_time
+        self.cfg.max_time = max_time
 
     @torch.no_grad()
     def dump_latents(self, old_latents: torch.FloatTensor, latents: torch.FloatTensor):
@@ -39,7 +49,7 @@ class Distilator:
 
         with torch.no_grad():
             time = torch.rand(1, generator=self.generator, device=self.device) 
-            time = time * (self.config["max_time"] - self.config["min_time"]) + self.config["min_time"]
+            time = time * (self.cfg.max_time - self.cfg.min_time) + self.cfg.min_time
             
             noise = torch.randn_like(latents, generator=self.generator, device=self.device)
             latents_noisy = time * noise + (1.0 - time) * latents
@@ -68,7 +78,7 @@ class Distilator:
         with torch.no_grad():
             for _ in range(nb_sub_steps):
                 time = torch.rand(1, generator=self.generator, device=self.device)
-                time = time * (self.config["max_time"] - self.config["min_time"]) + self.config["min_time"]
+                time = time * (self.cfg.max_time - self.cfg.min_time) + self.cfg.min_time
 
                 noise = torch.randn_like(latents, generator=self.generator, device=self.device)
 
@@ -92,8 +102,8 @@ class Distilator:
         latents = self.encode_image(image).float()
 
         with torch.no_grad():
-            time = torch.rand(1, generator=self.generator, device=self.device) 
-            time = time * (self.config["max_time"] - self.config["min_time"]) + self.config["min_time"]
+            time = torch.rand(1, generator=self.generator, device=self.device)
+            time = time * (self.cfg.max_time - self.cfg.min_time) + self.cfg.min_time
 
             # Sample noise and do a one step optimization of the noise
             noise = torch.randn_like(latents, generator=self.generator, device=self.device)

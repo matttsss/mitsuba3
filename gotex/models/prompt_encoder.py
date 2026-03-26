@@ -1,26 +1,37 @@
-import torch
+from dataclasses import dataclass
 
+import torch
 from diffusers import StableDiffusion3ControlNetPipeline
 
-class PromptEncoder(torch.nn.Module):
+from gotex.config import Configurable
+
+class PromptEncoder(Configurable):
+
+    @dataclass
+    class Config(Configurable.Config):
+        prompt: str
+        negative_prompt: str = ""
+
+        pretrained_model_name_or_path: str = "stabilityai/stable-diffusion-3-medium-diffusers"
+        use_directional_prompts: bool = True
+
     """Prompt encoder that computes CLIP+T5 embeddings and caches combined prompt encodings."""
     def __init__(self, config: dict, device: torch.device, dtype: torch.dtype):
-        super().__init__()
+        super().__init__(config)
     
         self.device = device
         self.dtype = dtype
-        self.cfg = config
 
         self.pipe = StableDiffusion3ControlNetPipeline.from_pretrained(
-            config["pretrained_model_name_or_path"],
+            self.cfg.pretrained_model_name_or_path,
             vae=None, transformer=None, controlnet=None, torch_dtype=dtype
         ).to(device)
         self.pipe.enable_sequential_cpu_offload()
 
         self.directions = (', side view', ', front view', ', back view', ', overhead view', '')
         prompts = [
-                f"{self.cfg["prompt"]}{direction}" for direction in self.directions
-        ] + [self.cfg["negative_prompt"]]
+                f"{self.cfg.prompt}{direction}" for direction in self.directions
+        ] + [self.cfg.negative_prompt]
 
 
         self.cached_prompt_encodings: dict[str, dict[str, torch.Tensor]] = {}
@@ -31,31 +42,6 @@ class PromptEncoder(torch.nn.Module):
                 "prompt_embeds": prompt_embeds[idx : idx + 1],
                 "pooled_prompt_embeds": pooled_prompt_embeds[idx : idx + 1],
             }
-
-
-    # def __init__(self, prompts: list[str] | None, device: torch.device, dtype: torch.dtype):
-    #     super().__init__()
-    
-    #     self.device = device
-    #     self.dtype = dtype
-
-    #     self.pipe = StableDiffusion3ControlNetPipeline.from_pretrained(
-    #         "stabilityai/stable-diffusion-3-medium-diffusers",
-    #         vae=None, transformer=None, controlnet=None, torch_dtype=torch.float16
-    #     ).to(device)
-
-    #     self.pipe.enable_sequential_cpu_offload()
-
-    #     self.cached_prompt_encodings: dict[str, dict[str, torch.Tensor]] = {}
-    #     if prompts is not None:
-    #         prompt_list = [prompts] if isinstance(prompts, str) else list(prompts)
-    #         prompt_embeds, pooled_prompt_embeds = self.compute_text_prompt_encodings(prompt_list, device=device)
-            
-    #         for idx, prompt in enumerate(prompt_list):
-    #             self.cached_prompt_encodings[prompt] = {
-    #                 "prompt_embeds": prompt_embeds[idx : idx + 1],
-    #                 "pooled_prompt_embeds": pooled_prompt_embeds[idx : idx + 1],
-    #             }
 
     @torch.no_grad()
     def compute_text_prompt_encodings(
