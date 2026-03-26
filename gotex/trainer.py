@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import torch
+import random
 
 import drjit as dr
 import mitsuba as mi
@@ -25,16 +26,15 @@ class Trainer:
         self.lr = 3e-2
         self._step_idx = 0
 
-        # '' is for the default prompt without directional cues
-        self.directions = ('front left', 'front right', 'back left', 'back right', '')
+        self.directions = ('side', 'front', 'back', 'overhead')
 
         self.prompt = self.sd.config['prompt']
         self.negative_prompt = self.sd.config["negative_prompt"]
         self.directional_prompts = {
                 direction: f"{self.prompt}, {direction}" for direction in self.directions
         }
-        t5_precompute_prompts = list(self.directional_prompts.values()) + [self.negative_prompt]
-        self.prompt_encoder = PromptEncoder(prompts=t5_precompute_prompts, device=device, dtype=self.sd.transformer.dtype)
+        prompts = list(self.directional_prompts.values()) + [self.negative_prompt]
+        self.prompt_encoder = PromptEncoder(prompts=prompts, device=device, dtype=self.sd.transformer.dtype)
 
         scene_params.keep(r'.*\.reflectance\.data')
         self.opt = mi.ad.Adam(lr=self.lr, params=scene_params)
@@ -52,8 +52,8 @@ class Trainer:
         if not self.camera_config['is_2d']:
             prompts = []
             # For every sensor, sample camera dir and get it's associated prompt embeddings
-            for k in self.opt_sensor_params.keys():
-                transform, direction_label = self.random_transform()
+            for sensor_idx, k in enumerate(self.opt_sensor_params.keys()):
+                transform, direction_label = self.random_transform(sensor_idx)
                 self.opt_sensor_params[k] = transform
 
                 prompts.append(self.directional_prompts[direction_label])
@@ -72,7 +72,7 @@ class Trainer:
         # Simple tone mapping for Stable Diffusion input
         dr_image = dr_image / (dr_image + 1)
         dr_image = dr_image ** (1/2.2)
-        dr_image = dr.clip(dr_image, 0, 1)
+        # dr_image = dr.clip(dr_image, 0, 1)
     
         loss = self.compute_loss(dr_image, dr_depth, prompts)
 
@@ -110,15 +110,16 @@ class Trainer:
         # Compute loss using Stable Diffusion
         return self.sd.compute_rdfs_loss(prompt_embedings, image, depth)
 
-    def _azimuth_to_direction(self, azimuth: float) -> str:
-        # Map azimuth quadrants to semantic prompt directions.
-        if -dr.pi / 2 <= azimuth < 0:
-            return 'front left'
-        if 0 <= azimuth < dr.pi / 2:
-            return 'front right'
-        if azimuth < -dr.pi / 2:
-            return 'back left'
-        return 'back right'
+    def _view_to_direction(self, azimuth: float, inclination: float) -> str:
+        # Prioritize top-down views, then map azimuth to front/side/back buckets.
+        if inclination <= dr.pi / 4:
+            return 'overhead'
+
+        if -dr.pi / 4 <= azimuth < dr.pi / 4:
+            return 'front'
+        if azimuth >= 3 * dr.pi / 4 or azimuth < -3 * dr.pi / 4:
+            return 'back'
+        return 'side'
     
 
     def setup_opt_sensors(self, nb_sensors: int, render_size: int, fov: float = 30.0):
@@ -166,23 +167,29 @@ class Trainer:
         self.opt_sensor_params = mi.traverse(self.opt_sensor)
         self.opt_sensor_params.keep(r'.*to_world')
 
-    def random_transform(self) -> tuple[mi.ScalarTransform4f, str]:
-        # if random.random() < 0.5:
-        #         elevation_deg = rng.uniform(mi.ScalarFloat, shape=1, 
-        #                                          low=camera_config['elevation_min'], high=camera_config['elevation_max'])
-        #         elevation = dr.deg2rad(elevation_deg)
-        # else:
-        #     elev_percent_low = (camera_config['elevation_min'] + 90.0) / 180.0
-        #     elev_percent_high = (camera_config['elevation_max'] + 90.0) / 180.0
-        #     u = rng.uniform(mi.ScalarFloat, shape=1, low=elev_percent_low, high=elev_percent_high)
-        #     elevation = dr.asin(2.0 * u - 1.0)
+    def random_transform(self, sensor_idx: int) -> tuple[mi.ScalarTransform4f, str]:
+        if random.random() < 0.5:
+                elevation_deg = self.generator.uniform(mi.ScalarFloat, shape=1, 
+                                                 low=self.camera_config['elevation_min'], high=self.camera_config['elevation_max'])
+                elevation = dr.deg2rad(elevation_deg)
+        else:
+            elev_percent_low = (self.camera_config['elevation_min'] + 90.0) / 180.0
+            elev_percent_high = (self.camera_config['elevation_max'] + 90.0) / 180.0
+            u = self.generator.uniform(mi.ScalarFloat, shape=1, low=elev_percent_low, high=elev_percent_high)
+            elevation = dr.asin(2.0 * u - 1.0)
 
-        elevation_min_rad = dr.deg2rad(90 - self.camera_config['elevation_min'])
-        elevation_max_rad = dr.deg2rad(90 - self.camera_config['elevation_max'])
+        if True:
+            # ensures sampled azimuth angles in a batch cover the whole range
+            azimuth = (
+                sensor_idx + self.generator.uniform(mi.ScalarFloat, shape=1)
+            ) / self.nb_sensors * dr.two_pi
+
+        else:
+            # simple random sampling
+            azimuth = self.generator.uniform(mi.ScalarFloat, shape=1, low=0.0, high=dr.two_pi)
         
-        ct = self.generator.uniform(mi.ScalarFloat, shape=1, low=dr.cos(elevation_min_rad), high=dr.cos(elevation_max_rad))
-        azimuth = self.generator.uniform(mi.ScalarFloat, shape=1, low=-dr.pi, high=dr.pi)
-        direction_label = self._azimuth_to_direction(azimuth)
+        elevation = 0.5 * dr.pi - elevation  # Convert to inclination
+        direction_label = self._view_to_direction(azimuth, elevation)
 
         camera_distances = self.generator.uniform(
             mi.ScalarFloat, shape=1, 
@@ -191,8 +198,8 @@ class Trainer:
 
         camera_perturb = self.camera_config['camera_perturb']
 
+        st, ct = dr.sincos(elevation)
         sp, cp = dr.sincos(azimuth)
-        st = dr.sqrt(1 - ct * ct)
         camera_positions = camera_distances * mi.ScalarVector3f(
             sp * st, ct, -cp * st
         )

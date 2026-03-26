@@ -9,7 +9,7 @@ import drjit as dr
 import mitsuba as mi
 
 from gotex.trainer import Trainer
-from gotex.scenes.dragon import load_scene
+from gotex.scenes.dragon_emisive import load_scene
 
 def main(args):
     random.seed(args.seed)
@@ -39,9 +39,6 @@ def main(args):
     for step_idx in iterator:
         
         image, loss = trainer.step(scene, scene_params)            
-
-        if step_idx == 2000:
-            trainer.sd.set_min_max_time(0.02, 0.70)
 
         if step_idx % args.nb_steps_save == 0:
             if args.disable_tqdm:

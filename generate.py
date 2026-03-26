@@ -1,34 +1,10 @@
-import logging
-import os
-import warnings
-
 import torch
 import mitsuba as mi
-from diffusers.utils import logging as diffusers_logging
-from huggingface_hub.utils import logging as hf_hub_logging
-from transformers.utils import logging as transformers_logging
 
-from gotex.models.prompt_encoder import PromptEncoder
 from gotex.models.sd import StableDiffusion
-
-
-def _configure_warning_filters() -> None:
-    # Keep runtime output readable by hiding known non-actionable third-party warnings.
-    os.environ.setdefault("DISABLE_SAFETENSORS_CONVERSION", "1")
-    warnings.filterwarnings(
-        "ignore",
-        message=r"The `local_dir_use_symlinks` argument is deprecated and ignored in `hf_hub_download`.*",
-        category=UserWarning,
-    )
-    transformers_logging.set_verbosity_error()
-    diffusers_logging.set_verbosity_error()
-    hf_hub_logging.set_verbosity_error()
-    logging.getLogger("transformers").setLevel(logging.ERROR)
-    logging.getLogger("diffusers").setLevel(logging.ERROR)
-    logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
+from gotex.models.prompt_encoder import PromptEncoder
 
 if __name__ == "__main__":
-    _configure_warning_filters()
 
     mi.set_variant('cuda_ad_rgb')
 
