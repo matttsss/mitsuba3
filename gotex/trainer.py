@@ -87,13 +87,9 @@ class Trainer(Configurable):
         dr_depth = Trainer.get_depth(self.scene, sensor=self.opt_sensor)
         dr_image = mi.render(self.scene, params=self.scene_params, sensor=self.opt_sensor, seed=self._step_idx)
 
-        dr_depth = dr.reshape(mi.TensorXf, dr_depth, (self.camera_cfg.render_size, self.camera_cfg.nb_sensors, self.camera_cfg.render_size))
-        dr_image = dr.reshape(mi.TensorXf, dr_image, (self.camera_cfg.render_size, self.camera_cfg.nb_sensors, self.camera_cfg.render_size, 3))
-
-        # Simple tone mapping for Stable Diffusion input
+        # Simple tone mapping for sdr inputs
         dr_image = dr_image / (dr_image + 1)
         dr_image = dr_image ** (1/2.2)
-        # dr_image = dr.clip(dr_image, 0, 1)
     
         loss = self.compute_loss(dr_image, dr_depth, camera_angles)
 
@@ -112,22 +108,20 @@ class Trainer(Configurable):
     
     @dr.wrap("drjit", "torch")
     def compute_loss(self, image: torch.Tensor, depth: torch.Tensor, camera_angles: list[tuple[float, float]]) -> torch.Tensor:
-        if image.ndim == 3:
-            image = image.unsqueeze(0).permute(0, 3, 1, 2)  # Convert (H, W, C) to (1, C, H, W)
-            depth = depth.detach().unsqueeze(0).repeat(3, 1, 1).unsqueeze(0)  # Convert to (1, 3, H, W)
-        elif image.ndim == 4:
-            # Don't ask about the weird order, it's the batch sensor 
-            image = image.permute(1, 3, 0, 2)  # Convert (H, B, W, C) to (B, C, H, W)
-            depth = depth.detach().unsqueeze(-1).repeat(1, 1, 1, 3).permute(1, 3, 0, 2)  # Convert to (B, 3, H, W)
-        else:
-            raise ValueError(f"Unsupported image shape: {image.shape}")
-        
+
+        image = torch.reshape(image, (self.camera_cfg.render_size, self.camera_cfg.nb_sensors, self.camera_cfg.render_size, 3))
+        depth = torch.reshape(depth, (self.camera_cfg.render_size, self.camera_cfg.nb_sensors, self.camera_cfg.render_size))
+
+        # Don't ask about the weird order, it's the batch sensor 
+        image = image.permute(1, 3, 0, 2)  # Convert (H, B, W, C) to (B, C, H, W)
+        depth = depth.detach().unsqueeze(-1).repeat(1, 1, 1, 3).permute(1, 3, 0, 2)  # Convert to (B, 3, H, W)
+
         prompt_embedings = self.prompt_processor.fetch_prompt(
             camera_angles=camera_angles,
             images=image,
         )
 
-        # Compute loss using Stable Diffusion
+        # Compute loss using our generative model
         return self.guidance.compute_rdfs_loss(prompt_embedings, image, depth)
     
 
@@ -245,7 +239,7 @@ class Trainer(Configurable):
             sample_pos = pos + mi.ScalarVector2f(0.5, 0.5)
             adjusted_pos = dr.fma(sample_pos, scale, offset)
 
-            ray, _ = scene.sensors()[0].sample_ray_differential(
+            ray, _ = sensor.sample_ray_differential(
                 time=0, sample1=0, sample2=adjusted_pos, sample3=0.5)
 
             pi = scene.ray_intersect_preliminary(ray, coherent=True)

@@ -105,7 +105,9 @@ class StableDiffusion(Distilator):
             # Prepare depth image as controlnet conditioning (encoded to latent space)
             controlnet_config = self.controlnet.config
             vae_shift_factor = 0 if controlnet_config.force_zeros_for_pooled_projection else self.vae.config.shift_factor
-            control_image = self.encode_image(depth, vae_shift_factor)
+
+            depth = self.vae.encode(depth).latent_dist.sample(generator=self.runtime.torch_generator)
+            control_image = (depth - vae_shift_factor) * self.vae.config.scaling_factor
 
             # Controlnet pooled projections (InstantX depth controlnet uses zero projections)
             if controlnet_config.force_zeros_for_pooled_projection:

@@ -12,7 +12,7 @@ def set_out_dir(out_dir: str):
 
 def save_image(image: mi.TensorXf, name: str):
     assert __out_dir__ is not None, "Output directory is not set. Call set_out_dir(out_dir) before saving images."
-    assert image.ndim == 3 and image.shape[-1] in [3, 4], "Expected image to have shape (H, W, C)"
+    assert image.ndim == 2 or (image.ndim == 3 and image.shape[-1] in [3, 4]), "Expected image to have shape (H, W, C) or (H, W)"
 
     mi.util.write_bitmap(os.path.join(__out_dir__, name), image)
 

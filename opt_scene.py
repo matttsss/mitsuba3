@@ -34,10 +34,8 @@ def main(args, extra):
             else:
                 dr.print("step {step_idx} | {loss=}", step_idx=step_idx, loss=loss)
             
-            images = image.torch().permute(1, 0, 2, 3)
-            for i, img in enumerate(images):
-                logger.save_image(img, f'render_{i}.exr')
 
+            logger.save_image(image, f'render_{step_idx}.png')
             for k, v in trainer.opt.items():
                 logger.save_image(v, f'{k.split(".")[0]}.exr')
 
