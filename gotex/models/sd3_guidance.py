@@ -5,9 +5,11 @@ import torch
 from diffusers.models import SD3ControlNetModel
 from diffusers import StableDiffusion3ControlNetPipeline
 
+import gotex
 from gotex.config import RuntimeContext
-from .distilator import Distilator
+from gotex.models.distilator import Distilator
 
+@gotex.register("sd3_guidance")
 class StableDiffusion(Distilator):
 
     @dataclass

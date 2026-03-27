@@ -9,8 +9,8 @@ trainer:
   lr: 3e-2
   opt_param_names: ['.*\.reflectance\.data']
 
-  max_steps: 1500
-  save_every: 50
+  max_steps: 300
+  save_every: 25
 
   camera:
     is_2d: false
@@ -28,7 +28,7 @@ trainer:
     center_perturb: 0.1
     up_perturb: 0.02
 
-  prompt_processor:
+  prompt_encoder:
     pretrained_model_name_or_path: "stabilityai/stable-diffusion-3-medium-diffusers"
     
     use_directional_prompts: true

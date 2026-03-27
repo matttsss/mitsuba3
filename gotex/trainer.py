@@ -8,11 +8,11 @@ import random
 import drjit as dr
 import mitsuba as mi
 
+import gotex
+from gotex.utils import load_scene
 from gotex.config import Configurable, RuntimeContext, parse_structured
-from gotex.models.sd import StableDiffusion
 
-from .models.prompt_encoder import PromptEncoder
-from .utils import load_scene
+from gotex.models import *
 
 class Trainer(Configurable):
 
@@ -24,9 +24,11 @@ class Trainer(Configurable):
         opt_param_names: list[str]= field(default_factory=lambda: [r'.*\.reflectance\.data'])
 
         scene: str = ""
+        guidance_name: str = "sd3_guidance"
         guidance: dict = field(default_factory=dict)
         camera: dict = field(default_factory=dict)
-        prompt_processor: dict = field(default_factory=dict)
+        prompt_encoder_name: str = "sd3_prompt_encoder"
+        prompt_encoder: dict = field(default_factory=dict)
 
     @dataclass
     class CameraConfig(Configurable.Config):
@@ -51,11 +53,15 @@ class Trainer(Configurable):
 
         self.scene = load_scene(self.cfg.scene)
         self.scene_params: mi.SceneParameters = mi.traverse(self.scene)
-        self.guidance = StableDiffusion(self.cfg.guidance, runtime=self.runtime)
-        self.prompt_processor = PromptEncoder(
-            self.cfg.prompt_processor,
+        self.guidance = gotex.find(self.cfg.guidance_name)(
+            self.cfg.guidance, 
+            runtime=self.runtime
+        )
+        self.prompt_encoder = gotex.find(self.cfg.prompt_encoder_name)(
+            self.cfg.prompt_encoder,
             runtime=self.runtime,
         )
+        self.prompt_encoder.prepare_encodings()
 
         self._step_idx = 0
 
@@ -116,7 +122,7 @@ class Trainer(Configurable):
         image = image.permute(1, 3, 0, 2)  # Convert (H, B, W, C) to (B, C, H, W)
         depth = depth.detach().unsqueeze(-1).repeat(1, 1, 1, 3).permute(1, 3, 0, 2)  # Convert to (B, 3, H, W)
 
-        prompt_embedings = self.prompt_processor.fetch_prompt(
+        prompt_embedings = self.prompt_encoder.fetch_prompt(
             camera_angles=camera_angles,
             images=image,
         )
