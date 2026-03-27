@@ -28,6 +28,7 @@ trainer:
     center_perturb: 0.1
     up_perturb: 0.02
 
+  prompt_encoder_name: "sd3_prompt_encoder"
   prompt_encoder:
     pretrained_model_name_or_path: "stabilityai/stable-diffusion-3-medium-diffusers"
     
@@ -36,6 +37,7 @@ trainer:
     prompt: "A photo of a blue dragon on a plain white piedestal, wings deployed above his head"
     negative_prompt: "unrealistic, blurry, low quality, oversaturation."
 
+  guidance_name: "sd3_guidance"
   guidance:
     pretrained_model_name_or_path: "stabilityai/stable-diffusion-3-medium-diffusers"
     

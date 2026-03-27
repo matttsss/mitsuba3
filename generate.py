@@ -1,7 +1,7 @@
 import torch
 import mitsuba as mi
 
-from gotex.models.sd import StableDiffusion
+from gotex.models.sd3_guidance import StableDiffusion
 from gotex.models.prompt_encoder import PromptEncoder
 
 if __name__ == "__main__":

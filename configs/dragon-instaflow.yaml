@@ -1,0 +1,48 @@
+name: "dragon-rfds-instaflow"
+exp_root_dir: "outputs"
+seed: 0
+device: "cuda"
+
+trainer:
+  scene: "dragon"
+
+  lr: 3e-2
+  opt_param_names: ['.*\.reflectance\.data']
+
+  max_steps: 300
+  save_every: 25
+
+  camera:
+    is_2d: false
+
+    nb_sensors: 5
+    render_size: 512
+
+    target: [0, 7, 0]
+    radius_min: 55.0
+    radius_max: 65.0
+    elevation_min: -10.0
+    elevation_max: 60.0
+
+    camera_perturb: 0.05
+    center_perturb: 0.1
+    up_perturb: 0.02
+
+  prompt_encoder_name: "instaflow_prompt_encoder"
+  prompt_encoder:
+    pretrained_model_name_or_path: "XCLiu/2_rectified_flow_from_sd_1_5"
+    
+    use_directional_prompts: true
+
+    prompt: "A photo of a blue dragon on a plain white piedestal, wings deployed above his head"
+    negative_prompt: "unrealistic, blurry, low quality, oversaturation."
+
+  guidance_name: "instaflow_guidance"
+  guidance:
+    pretrained_model_name_or_path: "XCLiu/2_rectified_flow_from_sd_1_5"
+    
+    controlnet_conditioning_scale: 0.0
+    guidance_scale: 100
+
+    min_time: 0.3
+    max_time: 0.98
