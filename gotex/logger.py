@@ -10,6 +10,13 @@ def set_out_dir(out_dir: str):
     global __out_dir__
     __out_dir__ = out_dir
 
+def save_config(config: dict, name: str = "config.yaml"):
+    assert __out_dir__ is not None, "Output directory is not set. Call set_out_dir(out_dir) before saving config."
+
+    with open(os.path.join(__out_dir__, name), 'w') as f:
+        import yaml
+        yaml.dump(config, f)
+
 def save_image(image: mi.TensorXf, name: str):
     assert __out_dir__ is not None, "Output directory is not set. Call set_out_dir(out_dir) before saving images."
     assert image.ndim == 2 or (image.ndim == 3 and image.shape[-1] in [3, 4]), "Expected image to have shape (H, W, C) or (H, W)"

@@ -1,5 +1,6 @@
-import argparse
 import os
+import argparse
+from datetime import datetime
 
 from tqdm.auto import trange
 
@@ -8,20 +9,22 @@ import mitsuba as mi
 
 import gotex.logger as logger
 from gotex.trainer import Trainer
-from gotex.config import ExperimentConfig, create_runtime, load_config
+from gotex.config import ExperimentConfig, create_runtime, load_config, config_to_primitive
 
 def main(args, extra):
     config: ExperimentConfig = load_config(args.config, cli_args=extra)
     runtime = create_runtime(seed=config.seed, device=config.device)
 
+    timestamp = datetime.now().strftime("%Y-%m-%d-%H:%M:%S")
+    out_folder = f'{config.exp_root_dir}/{config.name}@{timestamp}'
+    os.makedirs(out_folder, exist_ok=True)
+    logger.set_out_dir(out_folder)
+    logger.save_config(config_to_primitive(config))
+
     trainer = Trainer(
         config=config.trainer,
         runtime=runtime,
     )
-
-    out_folder = f'{config.exp_root_dir}/{config.name}'
-    os.makedirs(out_folder, exist_ok=True)
-    logger.set_out_dir(out_folder)
 
     iterator = trange(trainer.cfg.max_steps, desc="Optimizing", disable=not config.use_tqdm)
     for step_idx in iterator:
@@ -38,7 +41,10 @@ def main(args, extra):
             logger.save_image(image, f'render_{step_idx}.png')
             for k, v in trainer.opt.items():
                 logger.save_image(v, f'{k.split(".")[0]}.exr')
-
+    
+    logger.save_image(image, f'render_{step_idx}.png')
+    for k, v in trainer.opt.items():
+        logger.save_image(v, f'{k.split(".")[0]}.exr')
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Optimize scene texture parameters with Stable Diffusion guidance.")
