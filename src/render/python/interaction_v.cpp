@@ -42,6 +42,7 @@ MI_PY_EXPORT(SurfaceInteraction) {
         .def_field(SurfaceInteraction3f, shape,         "shape"_a.none(), D(SurfaceInteraction, shape))
         .def_field(SurfaceInteraction3f, uv,            D(SurfaceInteraction, uv))
         .def_field(SurfaceInteraction3f, sh_frame,      D(SurfaceInteraction, sh_frame))
+        .def_field(SurfaceInteraction3f, frame_flipped, D(SurfaceInteraction, frame_flipped))
         .def_field(SurfaceInteraction3f, dp_du,         D(SurfaceInteraction, dp_du))
         .def_field(SurfaceInteraction3f, dp_dv,         D(SurfaceInteraction, dp_dv))
         .def_field(SurfaceInteraction3f, dn_du,         D(SurfaceInteraction, dn_du))
@@ -57,8 +58,6 @@ MI_PY_EXPORT(SurfaceInteraction) {
         .def(nb::init<const SurfaceInteraction3f &>(), "Copy constructor")
         .def(nb::init<const PositionSample3f &, const Wavelength &>(), "ps"_a,
             "wavelengths"_a, D(SurfaceInteraction, SurfaceInteraction))
-        .def("initialize_sh_frame", &SurfaceInteraction3f::initialize_sh_frame,
-            D(SurfaceInteraction, initialize_sh_frame))
         .def("to_world", &SurfaceInteraction3f::to_world, "v"_a, D(SurfaceInteraction, to_world))
         .def("to_local", &SurfaceInteraction3f::to_local, "v"_a, D(SurfaceInteraction, to_local))
         .def("to_world_mueller", &SurfaceInteraction3f::to_world_mueller, "M_local"_a,
@@ -92,8 +91,8 @@ MI_PY_EXPORT(SurfaceInteraction) {
         .def_repr(SurfaceInteraction3f);
 
     MI_PY_DRJIT_STRUCT(si, SurfaceInteraction3f, t, time, wavelengths, p, n,
-                       shape, uv, sh_frame, dp_du, dp_dv, dn_du, dn_dv, duv_dx,
-                       duv_dy, wi, prim_index, instance)
+                       shape, uv, sh_frame, frame_flipped, dp_du, dp_dv, dn_du,
+                       dn_dv, duv_dx, duv_dy, wi, prim_index, instance)
 }
 
 MI_PY_EXPORT(MediumInteraction) {
@@ -152,7 +151,7 @@ MI_PY_EXPORT(PreliminaryIntersection) {
                        std::forward<const Ray3f&>(ray), ray_flags, active);
            },
            D(PreliminaryIntersection, compute_surface_interaction),
-           "ray"_a, "ray_flags"_a = +RayFlags::All, "active"_a = true)
+           "ray"_a, "ray_flags"_a = +RayFlags::Default, "active"_a = true)
         .def("zero_", &PreliminaryIntersection3f::zero_, D(PreliminaryIntersection, zero))
         .def_repr(PreliminaryIntersection3f);
 

@@ -93,13 +93,12 @@ MI_PY_DECLARE(Interaction);
 MI_PY_DECLARE(SurfaceInteraction);
 MI_PY_DECLARE(MediumInteraction);
 MI_PY_DECLARE(PreliminaryIntersection);
+MI_PY_DECLARE(DirectedEdge);
 MI_PY_DECLARE(Medium);
 MI_PY_DECLARE(mueller);
 MI_PY_DECLARE(MicrofacetDistribution);
 MI_PY_DECLARE(MicroflakeDistribution);
-#if defined(MI_ENABLE_CUDA)
 MI_PY_DECLARE(OptixDenoiser);
-#endif // defined(MI_ENABLE_CUDA)
 MI_PY_DECLARE(PositionSample);
 MI_PY_DECLARE(PhaseFunction);
 MI_PY_DECLARE(DirectionSample);
@@ -198,6 +197,7 @@ NB_MODULE(MI_VARIANT_NAME, m) {
 
     MI_PY_IMPORT(Scene);
     MI_PY_IMPORT(Shape);
+    MI_PY_IMPORT(DirectedEdge);
     MI_PY_IMPORT(Medium);
     MI_PY_IMPORT(Endpoint);
     MI_PY_IMPORT(Emitter);
@@ -217,9 +217,7 @@ NB_MODULE(MI_VARIANT_NAME, m) {
     MI_PY_IMPORT_SUBMODULE(mueller);
     MI_PY_IMPORT(MicrofacetDistribution);
     MI_PY_IMPORT(MicroflakeDistribution);
-#if defined(MI_ENABLE_CUDA)
     MI_PY_IMPORT(OptixDenoiser);
-#endif // defined(MI_ENABLE_CUDA)
     MI_PY_IMPORT(PhaseFunction);
     MI_PY_IMPORT(Sampler);
     MI_PY_IMPORT(Sensor);

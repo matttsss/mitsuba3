@@ -541,13 +541,18 @@ public:
      * \brief Compute and return detailed information related to a surface interaction
      *
      * The implementation should at most compute the fields \c p, \c uv, \c n,
-     * \c sh_frame.n, \c dp_du, \c dp_dv, \c dn_du and \c dn_dv. The \c flags parameter
-     * specifies which of those fields should be computed.
+     * \c sh_frame.n, \c dp_du, \c dp_dv, \c dn_du and \c dn_dv. The \c flags
+     * parameter specifies which of those fields should be computed.
      *
      * The fields \c t, \c time, \c wavelengths, \c shape, \c prim_index, \c instance,
      * will already have been initialized by the caller. The field \c wi is initialized
      * by the caller following the call to \ref compute_surface_interaction(), and
      * \c duv_dx, and \c duv_dy are left uninitialized.
+     *
+     * Every call must be followed by \ref
+     * SurfaceInteraction::finalize_surface_interaction(), which implementations
+     * rely on: it is what invalidates \c t on the inactive lanes, so they need
+     * not mask it themselves.
      *
      * \param ray
      *      Ray associated with the ray intersection
@@ -563,7 +568,7 @@ public:
      */
     virtual SurfaceInteraction3f compute_surface_interaction(const Ray3f &ray,
                                                              const PreliminaryIntersection3f &pi,
-                                                             uint32_t ray_flags = +RayFlags::All,
+                                                             uint32_t ray_flags = +RayFlags::Default,
                                                              uint32_t recursion_depth = 0,
                                                              Mask active = true) const;
 
@@ -580,7 +585,7 @@ public:
      *     Describe how the detailed information should be computed
      */
     SurfaceInteraction3f ray_intersect(const Ray3f &ray,
-                                       uint32_t ray_flags = +RayFlags::All,
+                                       uint32_t ray_flags = +RayFlags::Default,
                                        Mask active = true) const;
 
     //! @}
@@ -715,6 +720,10 @@ public:
      * information at an intersection. An example of this would be a per-vertex
      * or per-face color on a triangle mesh.
      *
+     * An attribute that the shape does not carry, or that does not fit the
+     * requested channel count, evaluates to zero. Use \ref has_attribute()
+     * to distinguish this from an attribute that is present and zero.
+     *
      * \param name
      *     Name of the attribute to evaluate
      *
@@ -793,7 +802,7 @@ public:
      * The default implementation throws.
      */
     virtual SurfaceInteraction3f eval_parameterization(const Point2f &uv,
-                                                       uint32_t ray_flags = +RayFlags::All,
+                                                       uint32_t ray_flags = +RayFlags::Default,
                                                        Mask active = true) const;
 
     //! @}

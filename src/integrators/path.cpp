@@ -199,7 +199,7 @@ public:
 
             // Fill out all information of the interaction
             SurfaceInteraction3f si =
-                ls.pi.compute_surface_interaction(ls.ray, +RayFlags::All);
+                ls.pi.compute_surface_interaction(ls.ray, +RayFlags::Default);
 
             // ---------------------- Direct emission ----------------------
 
@@ -292,7 +292,7 @@ public:
                samples and discontinuous visibility. We need to re-evaluate the
                BSDF differentiably with the detached sample in that case. */
             if (dr::grad_enabled(ls.ray)) {
-                ls.ray = dr::detach<true>(ls.ray);
+                ls.ray = dr::detach(ls.ray);
 
                 // Recompute 'wo' to propagate derivatives to cosine term
                 Vector3f wo_2 = si.to_local(ls.ray.d);
@@ -360,7 +360,7 @@ public:
         pdf_a *= pdf_a;
         pdf_b *= pdf_b;
         Float w = pdf_a / (pdf_a + pdf_b);
-        return dr::detach<true>(dr::select(dr::isfinite(w), w, 0.f));
+        return dr::detach(dr::select(dr::isfinite(w), w, 0.f));
     }
 
     /**

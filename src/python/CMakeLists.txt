@@ -209,7 +209,14 @@ foreach (MI_VARIANT ${MI_VARIANTS})
   list(APPEND MI_ALL_VARIANTS ${MI_VARIANT_NAME})
 endforeach()
 
-set(MI_STUB_DEPENDS mitsuba_alias mitsuba_ext mitsuba-copy-python-src drjit-python ${MI_ALL_VARIANTS})
+set(MI_STUB_DEPENDS mitsuba_alias mitsuba_ext mitsuba-copy-python-src ${MI_ALL_VARIANTS})
+
+# We usually build Dr.Jit along with Mitsuba (except building wheels in the
+# cloud, as indicated by SKBUILD). In that case, Mitsuba stub generation
+# must depend on Dr.Jit's python bindings being compiled.
+if (NOT SKBUILD)
+  list(APPEND MI_STUB_DEPENDS drjit-python)
+endif()
 
 # ----------------------------------------------------------
 #   Copy targets for python (no rpath on Windows)
@@ -299,6 +306,7 @@ endif()
 if (UNIX)
   include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/../../ext/nanogui/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../ext/struct-jit/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../../ext/drjit/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../../ext/drjit/ext/drjit-core/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../../ext/drjit/ext/drjit-core/ext/nanothread/include
@@ -313,8 +321,15 @@ if (UNIX)
   endforeach()
 
   foreach (value ${MKDOC_COMPILE_DEFINITIONS})
-    list(APPEND MKDOC_CXXFLAGS -D${value})
+    if (NOT value MATCHES "^MI_ENABLE_")
+      list(APPEND MKDOC_CXXFLAGS -D${value})
+    endif()
   endforeach()
+
+  # Turn on every optional backend so that the generated docstrings don't
+  # depend on the platform and configuration used to generate them
+  list(APPEND MKDOC_CXXFLAGS -DMI_ENABLE_AUTODIFF=1 -DMI_ENABLE_CUDA=1
+       -DMI_ENABLE_LLVM=1 -DMI_ENABLE_METAL=1 -DMI_ENABLE_EMBREE=1)
 
   add_custom_target(docstrings USES_TERMINAL COMMAND
     ${Python_EXECUTABLE} -m pybind11_mkdoc -std=c++17 -stdlib=libc++ -ferror-limit=100000
@@ -322,6 +337,7 @@ if (UNIX)
     `find ${MKDOC_PATH}/core -name '*.h' ! -name fwd.h -print`
     `find ${MKDOC_PATH}/render -name '*.h' ! -name fwd.h -print`
     `find ${MKDOC_PATH}/ui -name '*.h' ! -name fwd.h -print`
+    ${MKDOC_PATH}/render/fwd.h
     -o ${MKDOC_PATH}/python/docstr.h
   )
 endif()

@@ -23,8 +23,6 @@
 #include "../render/metal/shapes.h"
 #endif
 
-#include "../render/bbox_reduce.h"
-
 NAMESPACE_BEGIN(mitsuba)
 
 /**!
@@ -294,10 +292,10 @@ public:
 
         if constexpr (dr::is_jit_v<Float>) {
             DynamicBuffer<UInt32> idx = dr::arange<DynamicBuffer<UInt32>>(m_control_point_count);
-            dr::scatter(m_control_points, dr::gather<FloatStorage>(vertex_buffer, idx * 3u + 0u), idx * 4u + 0u);
-            dr::scatter(m_control_points, dr::gather<FloatStorage>(vertex_buffer, idx * 3u + 1u), idx * 4u + 1u);
-            dr::scatter(m_control_points, dr::gather<FloatStorage>(vertex_buffer, idx * 3u + 2u), idx * 4u + 2u);
-            dr::scatter(m_control_points, dr::gather<FloatStorage>(radius_buffer, idx * 1u + 0u), idx * 4u + 3u);
+            dr::scatter(m_control_points, dr::gather<FloatStorage>(vertex_buffer, idx * 3u + 0u), idx * 4u + 0u, true, ReduceMode::NoConflicts);
+            dr::scatter(m_control_points, dr::gather<FloatStorage>(vertex_buffer, idx * 3u + 1u), idx * 4u + 1u, true, ReduceMode::NoConflicts);
+            dr::scatter(m_control_points, dr::gather<FloatStorage>(vertex_buffer, idx * 3u + 2u), idx * 4u + 2u, true, ReduceMode::NoConflicts);
+            dr::scatter(m_control_points, dr::gather<FloatStorage>(radius_buffer, idx * 1u + 0u), idx * 4u + 3u, true, ReduceMode::NoConflicts);
         } else {
             for (size_t i = 0; i < m_control_point_count; ++i) {
                 m_control_points[i * 4 + 0] = vertex_buffer[i * 3 + 0];
@@ -494,7 +492,7 @@ public:
             ss.uv = Point2f(sample.y(), sample.x()); // We use the x-axis as the cylindrical axis
             auto [dp_du, dp_dv, dn_du, dn_dv, L, M, N] = partials(ss.uv, active);
             SurfaceInteraction3f si = eval_parameterization(
-                ss.uv, +RayFlags::AllNonDifferentiable, active);
+                ss.uv, RayFlags::Default | RayFlags::DetachShape, active);
             ss.p = si.p;
 
             /// Sample a tangential direction at the point
@@ -763,7 +761,7 @@ public:
 
             ss.uv = Point2f(u_lower, si.uv.y());
             SurfaceInteraction3f si_ = eval_parameterization(
-                ss.uv, +RayFlags::AllNonDifferentiable, active);
+                ss.uv, RayFlags::Default | RayFlags::DetachShape, active);
             ss.p = si_.p;
             ss.n = si_.n;
             ss.d = dr::normalize(ss.p - viewpoint);
@@ -882,10 +880,7 @@ public:
             return dr::zeros<SurfaceInteraction3f>();
 
         // Fields requirement dependencies
-        bool need_dn_duv = has_flag(ray_flags, RayFlags::dNSdUV) ||
-                           has_flag(ray_flags, RayFlags::dNGdUV);
-        bool need_dp_duv  = has_flag(ray_flags, RayFlags::dPdUV) || need_dn_duv;
-        bool need_uv      = has_flag(ray_flags, RayFlags::UV) || need_dp_duv;
+        bool shading      = has_flag(ray_flags, RayFlags::Shading);
         bool detach_shape = has_flag(ray_flags, RayFlags::DetachShape);
         bool follow_shape = has_flag(ray_flags, RayFlags::FollowShape);
 
@@ -909,114 +904,96 @@ public:
         Vector3f u_rot, u_rad;
         std::tie(u_rot, u_rad) = local_frame(dc_dv_normalized);
 
+        // Primal geometry at the hit point
+        si.t = pi.t;
+        si.p = dr::detach(ray(pi.t));
+
+        Vector3f rad_vec_d = si.p - dr::detach(c);
+        si.n = dr::normalize(
+            (dr::squared_norm(dr::detach(dc_dv)) -
+             dr::dot(rad_vec_d, dr::detach(dc_dvv))) * rad_vec_d -
+            (dr::detach(dr_dv) * dr::detach(radius)) * dr::detach(dc_dv));
+
+        /* Surface position at the detached parameterization: the angular
+           coordinate does not move with the curve. */
+        Vector3f rad_vec_dn = dr::normalize(rad_vec_d);
+        Float u = dr::atan2(dr::dot(dr::detach(u_rot), rad_vec_dn),
+                            dr::dot(dr::detach(u_rad), rad_vec_dn));
+        u += dr::select(u < 0.f, dr::TwoPi<Float>, 0.f);
+        u *= dr::InvTwoPi<Float>;
+
+        auto [sin_u, cos_u] = dr::sincos(u * dr::TwoPi<Float>);
+        Point3f p_att = c + (cos_u * u_rad + sin_u * u_rot) * radius;
+
+        si.attach_motion(ray, p_att, ray_flags);
+
         if constexpr (IsDiff) {
-            // Compute attached interaction point (w.r.t curve parameters)
-            Point3f p = ray(pi.t);
-            Vector3f rad_vec = p - c;
-            Vector3f rad_vec_normalized = dr::normalize(rad_vec);
-
-            Float u = dr::atan2(dr::dot(u_rot, rad_vec_normalized),
-                                dr::dot(u_rad, rad_vec_normalized));
-            u += dr::select(u < 0.f, dr::TwoPi<Float>, 0.f);
-            u *= dr::InvTwoPi<Float>;
-            u = dr::detach(u); // u has no motion
-
-            auto [sin_v, cos_v] = dr::sincos(u * dr::TwoPi<Float>);
-            Point3f p_diff = c + cos_v * u_rad * radius + sin_v * u_rot * radius;
-            p = dr::replace_grad(p, p_diff);
-
-            if (follow_shape) {
-                /* FollowShape glues the interaction point with the shape.
-                   Therefore, to also account for a possible differential motion
-                   of the shape, the interaction point must be completely
-                   differentiable w.r.t. the curve parameters. */
-                si.p = p;
-                Float t_diff = dr::sqrt(dr::squared_norm(si.p - ray.o) /
-                                        dr::squared_norm(ray.d));
-                si.t = dr::replace_grad(pi.t, t_diff);
-            } else {
-                /* To ensure that the differential interaction point stays along
-                   the traced ray, we first recompute the intersection distance
-                   in a differentiable way (w.r.t. the curve parameters) and
-                   then compute the corresponding point along the ray. (Instead
-                   of computing an intersection with the curve, we compute an
-                   intersection with the tangent plane.) */
-                Vector3f rad_vec_diff = si.p - c;
-                rad_vec = dr::replace_grad(rad_vec, rad_vec_diff);
-
-                // Differentiable tangent plane normal
-                Float correction = dr::dot(rad_vec, dc_dvv);
-                Vector3f n = dr::normalize(
-                    (dr::squared_norm(dc_dv) - correction) * rad_vec -
-                    (dr_dv * radius) * dc_dv
-                );
-
-                // Tangent plane intersection
-                Float t_diff = dr::dot(p - ray.o, n) / dr::dot(n, ray.d);
-                si.t = dr::replace_grad(pi.t, t_diff);
-                si.p = ray(si.t);
-
-                // Compute `v_local` with correct (hit point) motion
+            if (!follow_shape) {
+                /* Let the curve parameter follow the sliding of the
+                   interaction point across the moving surface */
                 Float v_global = (v_local + prim_idx) / dr::width(m_indices);
                 Vector3f dp_dv;
                 std::tie(std::ignore, dp_dv, std::ignore, std::ignore,
                          std::ignore, std::ignore, std::ignore) =
                     partials(Point2f(u, v_global), active);
                 dp_dv = dr::detach(dp_dv);
-                Float dp_dv_sqrnorm = dr::squared_norm(dp_dv);
-                Float v_diff = dr::dot(si.p - p_diff, dp_dv) / dp_dv_sqrnorm;
-                v_global = dr::replace_grad(v_global, v_diff);
-                Float v_local_diff = v_global * dr::width(m_indices) - prim_idx;;
-                v_local =  dr::replace_grad(v_local, v_local_diff);
 
-                // Recompute values with new `v_local` motion
-                std::tie(c, dc_dv, dc_dvv, std::ignore, radius, dr_dv, std::ignore) =
+                Float v_diff = dr::dot(si.p - p_att, dp_dv) /
+                               dr::squared_norm(dp_dv);
+                v_global = dr::replace_grad(v_global, v_global + v_diff);
+                v_local  = dr::replace_grad(
+                    v_local, v_global * dr::width(m_indices) - prim_idx);
+
+                // Recompute the center line with the correct motion
+                std::tie(c, dc_dv, dc_dvv, std::ignore, radius, dr_dv,
+                         std::ignore) =
                     cubic_interpolation(v_local, prim_idx, active);
                 dc_dv_normalized = dr::normalize(dc_dv);
                 std::tie(u_rot, u_rad) = local_frame(dc_dv_normalized);
             }
-        } else {
-            si.t = pi.t;
-            si.p = ray(si.t);
         }
-
-        si.t = dr::select(active, si.t, dr::Infinity<Float>);
 
         // Normal
         Vector3f rad_vec = si.p - c;
-        Vector3f rad_vec_normalized = dr::normalize(rad_vec);
         Float correction = dr::dot(rad_vec, dc_dvv);  // curvature correction
-        Normal3f n = dr::normalize(
+        si.n = dr::normalize(
             (dr::squared_norm(dc_dv) - correction) * rad_vec -
             (dr_dv * radius) * dc_dv
         );
-        si.n = si.sh_frame.n = n;
 
         // Embree and OptiX cull curve backfaces at trace time; Metal's HW
         // intersector reports both sides. Drop inside hits to match (a no-op
         // on backends that already cull).
         this->cull_backface(si, ray, active);
 
-        if (need_uv) {
-            Float u = dr::atan2(dr::dot(u_rot, rad_vec_normalized),
-                                dr::dot(u_rad, rad_vec_normalized));
-            u += dr::select(u < 0.f, dr::TwoPi<Float>, 0.f);
-            u *= dr::InvTwoPi<Float>;
+        if (shading) {
+            /* Recompute the angular coordinate so that it tracks the motion of
+               the interaction point, unlike the one that defined ``p_att`` */
+            Vector3f rad_vec_n = dr::normalize(rad_vec);
+            Float u_att = dr::atan2(dr::dot(u_rot, rad_vec_n),
+                                    dr::dot(u_rad, rad_vec_n));
+            u_att += dr::select(u_att < 0.f, dr::TwoPi<Float>, 0.f);
+            u_att *= dr::InvTwoPi<Float>;
+            if constexpr (IsDiff)
+                u_att = dr::replace_grad(u, u_att);
+
             Float v = (v_local + prim_idx) / dr::width(m_indices);
 
-            si.uv = Point2f(u, v);
-        }
+            si.uv = Point2f(u_att, v);
 
-        if (need_dp_duv) {
             Vector3f dp_du, dp_dv, dn_du, dn_dv;
             std::tie(dp_du, dp_dv, dn_du, dn_dv, std::ignore, std::ignore,
                      std::ignore) = partials(si.uv, active);
             si.dp_du = dp_du;
             si.dp_dv = dp_dv;
-            if (need_dn_duv) {
+
+            if (has_flag(ray_flags, RayFlags::NormalPartials)) {
                 si.dn_du = dn_du;
                 si.dn_dv = dn_dv;
             }
+
+            si.sh_frame.n = si.n;
+            si.sh_frame.s = dp_du;
         }
 
         si.prim_index = pi.prim_index;
@@ -1073,26 +1050,10 @@ private:
     }
 
     void recompute_bbox() {
-        m_bbox.reset();
-        if (m_control_point_count == 0)
-            return;
-
-        if constexpr (dr::is_jit_v<Float>) {
-            m_bbox = device_reduce_bbox<ScalarPoint3f>(
-                m_control_points, m_control_point_count, 4, /* radius_offset = */ 3);
-        } else {
-            const InputFloat *ptr = m_control_points.data();
-            for (ScalarSize i = 0; i < m_control_point_count; ++i) {
-                ScalarPoint3f p(ptr[4 * i + 0], ptr[4 * i + 1], ptr[4 * i + 2]);
-                ScalarFloat r(ptr[4 * i + 3]);
-                m_bbox.expand(p + r * ScalarVector3f(-1, 0, 0));
-                m_bbox.expand(p + r * ScalarVector3f(1, 0, 0));
-                m_bbox.expand(p + r * ScalarVector3f(0, -1, 0));
-                m_bbox.expand(p + r * ScalarVector3f(0, 1, 0));
-                m_bbox.expand(p + r * ScalarVector3f(0, 0, -1));
-                m_bbox.expand(p + r * ScalarVector3f(0, 0, 1));
-            }
-        }
+        m_bbox = reduce_bbox<
+            /* Type = */ ScalarPoint3f,
+            /* Stride = */ 4,
+            /* RadiusOffset = */ 3>(m_control_points, m_control_point_count);
     }
 
     std::tuple<Point3f, Vector3f, Vector3f, Vector3f, Float, Float, Float>

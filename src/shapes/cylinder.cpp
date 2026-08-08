@@ -678,17 +678,12 @@ public:
                                                      uint32_t recursion_depth,
                                                      Mask active) const override {
         MI_MASK_ARGUMENT(active);
-        constexpr bool IsDiff = dr::is_diff_v<Float>;
 
         // Early exit when tracing isn't necessary
         if (!m_is_instance && recursion_depth > 0)
             return dr::zeros<SurfaceInteraction3f>();
 
-        // Fields requirement dependencies
-        bool need_dn_duv  = has_flag(ray_flags, RayFlags::dNSdUV) ||
-                            has_flag(ray_flags, RayFlags::dNGdUV);
         bool detach_shape = has_flag(ray_flags, RayFlags::DetachShape);
-        bool follow_shape = has_flag(ray_flags, RayFlags::FollowShape);
 
         const Float& radius = m_radius.value();
         const AffineTransform4f& to_world = m_to_world.value();
@@ -701,63 +696,48 @@ public:
 
         SurfaceInteraction3f si = dr::zeros<SurfaceInteraction3f>();
 
+        /* Local coordinates of the hit point, re-projected onto the unit
+           cylinder to mitigate roundoff error */
+        Point3f local = dr::detach(to_object * ray(pi.t));
+        Float inv_r = dr::rcp(dr::norm(dr::head<2>(local)));
+        local.x() *= inv_r;
+        local.y() *= inv_r;
+
         si.t = pi.t;
-        si.p = ray(si.t);
-        Point3f local;
-        if constexpr (IsDiff) {
-            if (follow_shape) {
-                /* FollowShape glues the interaction point with the shape.
-                   Therefore, to also account for a possible differential motion
-                   of the shape, we first compute a detached intersection point
-                   in local space and transform it back in world space to get a
-                   point rigidly attached to the shape's motion, including
-                   translation, scaling and rotation. */
-                local = to_object * si.p;
-                Float r = dr::norm(dr::head<2>(local));
-                local.x() /= r;
-                local.y() /= r;
-                local = dr::detach(local);
-                si.p = to_world * local;
-                si.t = dr::sqrt(dr::squared_norm(si.p - ray.o) / dr::squared_norm(ray.d));
-            } else {
-                /* To ensure that the differential interaction point stays along
-                   the traced ray, we first recompute the intersection distance
-                   in a differentiable way (w.r.t. to the cylindrical parameters) and
-                   then compute the corresponding point along the ray. */
-                si.t = dr::replace_grad(si.t, ray_intersect_preliminary(ray, 0, active).t);
-                si.p = ray(si.t);
-                local = to_object * si.p;
-            }
-        } else {
-            local = to_object * si.p;
-        }
+        si.p = dr::detach(to_world) * local;
+        si.n = Normal3f(dr::normalize(
+            dr::detach(to_world) * Normal3f(local.x(), local.y(), 0.f)));
 
-        si.t = dr::select(active, si.t, dr::Infinity<Float>);
+        // The local coordinates are static as the cylinder moves
+        Point3f p_att = to_world * local;
 
-        // si.uv
-        Float phi = dr::atan2(local.y(), local.x());
-        dr::masked(phi, phi < 0.f) += dr::TwoPi<Float>;
-        si.uv = Point2f(phi * dr::InvTwoPi<Float>, local.z());
-        // si.dp_duv & si.n
-        Vector3f dp_du = dr::TwoPi<Float> * Vector3f(-local.y(), local.x(), 0.f);
-        Vector3f dp_dv = Vector3f(0.f, 0.f, 1.f);
-        si.dp_du = to_world * dp_du;
-        si.dp_dv = to_world * dp_dv;
-        si.n = Normal3f(dr::normalize(dr::cross(si.dp_du, si.dp_dv)));
+        si.attach_motion(ray, p_att, ray_flags);
 
-        if constexpr (!IsDiff) {
-            /* Mitigate roundoff error issues by a normal shift of the computed
-               intersection point */
-            si.p += si.n * (1.f - dr::norm(dr::head<2>(local)));
-        }
+        local = to_object * si.p;
+
+        Vector3f dp_du = to_world * (dr::TwoPi<Float> *
+                                     Vector3f(-local.y(), local.x(), 0.f)),
+                 dp_dv = to_world * Vector3f(0.f, 0.f, 1.f);
+
+        si.n = Normal3f(dr::normalize(dr::cross(dp_du, dp_dv)));
 
         if (m_flip_normals)
             si.n = -si.n;
-        si.sh_frame.n = si.n;
 
-        if (likely(need_dn_duv)) {
-            si.dn_du = si.dp_du / (radius * (m_flip_normals ? -1.f : 1.f));
-            si.dn_dv = Vector3f(0.f);
+        if (likely(has_flag(ray_flags, RayFlags::Shading))) {
+            Float phi = dr::atan2(local.y(), local.x());
+            dr::masked(phi, phi < 0.f) += dr::TwoPi<Float>;
+
+            si.uv         = Point2f(phi * dr::InvTwoPi<Float>, local.z());
+            si.dp_du      = dp_du;
+            si.dp_dv      = dp_dv;
+            si.sh_frame.n = si.n;
+            si.sh_frame.s = dp_du;
+
+            // The normal partial along 'v' vanishes, the cylinder is straight
+            if (has_flag(ray_flags, RayFlags::NormalPartials))
+                si.dn_du = dp_du * ((m_flip_normals ? -1.f : 1.f) *
+                                    dr::rcp(m_radius.value()));
         }
 
         si.prim_index = pi.prim_index;
