@@ -51,6 +51,13 @@ static bool init_variant_backend(std::string_view variant) {
     }
 #endif
 
+#if defined(MI_ENABLE_VULKAN)
+    if (string::starts_with(variant, "vulkan_")) {
+        jit_init(1u << (uint32_t) JitBackend::Vulkan);
+        return jit_has_backend(JitBackend::Vulkan);
+    }
+#endif
+
     return false;
 }
 
@@ -219,7 +226,7 @@ int main(int argc, char *argv[]) {
 
         logger->set_log_level(log_level_mitsuba[std::min(log_level, 2)]);
 
-#if defined(MI_ENABLE_CUDA) || defined(MI_ENABLE_LLVM) || defined(MI_ENABLE_METAL)
+#if defined(MI_ENABLE_CUDA) || defined(MI_ENABLE_LLVM) || defined(MI_ENABLE_METAL) || defined(MI_ENABLE_VULKAN)
         ::LogLevel log_level_drjit[] = {
             ::LogLevel::Error,
             ::LogLevel::Warn,
@@ -266,12 +273,13 @@ int main(int argc, char *argv[]) {
             mode = "scalar_rgb";
         }
 
-        bool cuda  = string::starts_with(mode, "cuda_");
-        bool llvm  = string::starts_with(mode, "llvm_");
-        bool metal = string::starts_with(mode, "metal_");
-        bool jit   = cuda || llvm || metal;
+        bool cuda   = string::starts_with(mode, "cuda_");
+        bool llvm   = string::starts_with(mode, "llvm_");
+        bool metal  = string::starts_with(mode, "metal_");
+        bool vulkan = string::starts_with(mode, "vulkan_");
+        bool jit    = cuda || llvm || metal || vulkan;
 
-#if defined(MI_ENABLE_LLVM) || defined(MI_ENABLE_CUDA) || defined(MI_ENABLE_METAL)
+#if defined(MI_ENABLE_LLVM) || defined(MI_ENABLE_CUDA) || defined(MI_ENABLE_METAL) || defined(MI_ENABLE_VULKAN)
         if (jit && *arg_source)
             jit_set_flag(JitFlag::PrintIR, true);
 #else
@@ -279,10 +287,10 @@ int main(int argc, char *argv[]) {
 #endif
 
         if (!jit && *arg_source)
-            Throw("Specified an argument that only makes sense in a JIT (LLVM/CUDA/Metal) mode!");
+            Throw("Specified an argument that only makes sense in a JIT (LLVM/CUDA/Metal/Vulkan) mode!");
 
         Profiler::static_initialization();
-        color_management_static_initialization(cuda, llvm, metal);
+        color_management_static_initialization(cuda, llvm, metal, vulkan);
 
         MI_INVOKE_VARIANT(mode, scene_static_accel_initialization);
 
@@ -387,6 +395,11 @@ int main(int argc, char *argv[]) {
 
 #if defined(MI_ENABLE_METAL)
     if (string::starts_with(mode, "metal_"))
+        jit_shutdown();
+#endif
+
+#if defined(MI_ENABLE_VULKAN)
+    if (string::starts_with(mode, "vulkan_"))
         jit_shutdown();
 #endif
 

@@ -86,6 +86,8 @@ for variant in mi.variants():
         continue
     if variant.startswith("metal") and not dr.has_backend(dr.JitBackend.Metal):
         continue
+    if variant.startswith("vulkan") and not dr.has_backend(dr.JitBackend.Vulkan):
+        continue
     available.append(variant)
 
 # Create the variant filter helper
@@ -95,7 +97,7 @@ v = VariantFilter(available)
 suffixes = ["_mono", "_mono_polarized", "_rgb", "_spectral", "_spectral_polarized"]
 suffix_variants = [a + b for a in suffixes for b in ["", "_double"]]
 all_possible_variants = ["scalar" + s for s in suffix_variants] + [
-    a + b + c for a in ["llvm", "cuda", "metal"] for b in ["", "_ad"] for c in suffix_variants]
+    a + b + c for a in ["llvm", "cuda", "metal", "vulkan"] for b in ["", "_ad"] for c in suffix_variants]
 
 # Create single variant fixtures for all possible variants
 for variant in all_possible_variants:
@@ -107,23 +109,26 @@ variant_groups = {
     "any_llvm": v.all("llvm").one(),
     "any_cuda": v.all("cuda").one(),
     "any_metal": v.all("metal").one(),
+    "any_vulkan": v.all("vulkan").one(),
     "all": v,
     "all_scalar": v.all("scalar"),
     "all_rgb": v.all("rgb"),
     "all_rgb_unpolarized": v.all("rgb").exclude("polarized"),
-    "cpu_rgb": v.all("rgb").exclude("cuda", "metal"),
+    "cpu_rgb": v.all("rgb").exclude("cuda", "metal", "vulkan"),
     "all_spectral": v.all("spectral"),
     "all_backends_once": v.all("scalar").one()
     + v.all("llvm").one()
     + v.all("cuda").one()
-    + v.all("metal").one(),
+    + v.all("metal").one()
+    + v.all("vulkan").one(),
     "vec_backends_once": v.all("llvm").one() + v.all("cuda").one()
-    + v.all("metal").one(),
+    + v.all("metal").one() + v.all("vulkan").one(),
     "vec_backends_once_rgb": v.all("llvm", "rgb").one() + v.all("cuda", "rgb").one()
-    + v.all("metal", "rgb").one(),
+    + v.all("metal", "rgb").one() + v.all("vulkan", "rgb").one(),
     "vec_backends_once_spectral": v.all("llvm", "spectral").one()
     + v.all("cuda", "spectral").one()
-    + v.all("metal", "spectral").one(),
+    + v.all("metal", "spectral").one()
+    + v.all("vulkan", "spectral").one(),
     "vec_rgb": v.all("rgb").exclude("scalar"),
     "vec_spectral": v.all("spectral").exclude("scalar"),
     "all_ad_rgb": v.all("ad", "rgb"),
@@ -180,6 +185,7 @@ class TestMetricsPlugin:
                 dr.JitBackend.CUDA,
                 dr.JitBackend.LLVM,
                 dr.JitBackend.Metal,
+                dr.JitBackend.Vulkan,
             ]:
                 usage = dr.detail.malloc_watermark(backend)
                 if usage > 0:
@@ -312,7 +318,7 @@ def pytest_collection_modifyitems(config, items):
     """
     import re
 
-    pattern = re.compile(r"\[((cuda|llvm|scalar)_[^,-\]]*)")
+    pattern = re.compile(r"\[((cuda|llvm|metal|vulkan|scalar)_[^,-\]]*)")
 
     variant_items = []
     for item in items:

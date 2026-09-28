@@ -133,7 +133,7 @@ public:
     /// Box layout of the GPU acceleration structure builders
     struct PackedBoundingBox { float min[3], max[3]; };
 
-    static constexpr bool IsGPU = dr::is_cuda_v<Float> || dr::is_metal_v<Float>;
+    static constexpr bool IsGPU = dr::is_cuda_v<Float> || dr::is_metal_v<Float> || dr::is_vulkan_v<Float>;
     using BoundingBoxType =
         std::conditional_t<IsGPU, PackedBoundingBox, ScalarBoundingBox3f>;
 

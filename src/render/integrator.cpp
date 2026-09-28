@@ -33,7 +33,7 @@ public:
     RenderProfiler(bool enabled) {
         if constexpr (dr::is_jit_v<Float>) {
             if (enabled && !jit_flag(JitFlag::FreezingScope) &&
-                !dr::is_metal_v<Float>) {
+                !dr::is_metal_v<Float> && !dr::is_vulkan_v<Float>) {
                 m_start = jit_event_create(dr::backend_v<Float>, 1);
                 m_end   = jit_event_create(dr::backend_v<Float>, 1);
                 jit_event_record(m_start);

@@ -8,7 +8,7 @@ MI_VARIANT ShapeGroup<Float, Spectrum>::ShapeGroup(const Properties &props)
     // ID is now stored in base class JitObject
 
 #if !defined(MI_ENABLE_EMBREE)
-    if constexpr (!dr::is_cuda_v<Float> && !dr::is_metal_v<Float>)
+    if constexpr (!dr::is_cuda_v<Float> && !dr::is_metal_v<Float> && !dr::is_vulkan_v<Float>)
         m_kdtree = new ShapeKDTree(props);
 #endif
     m_shape_types = 0;
@@ -35,12 +35,12 @@ MI_VARIANT ShapeGroup<Float, Spectrum>::ShapeGroup(const Properties &props)
             m_shapes.push_back(shape);
             shape->mark_as_instance();
 
-#if defined(MI_ENABLE_EMBREE) || defined(MI_ENABLE_CUDA) || defined(MI_ENABLE_METAL)
+#if defined(MI_ENABLE_EMBREE) || defined(MI_ENABLE_CUDA) || defined(MI_ENABLE_METAL) || defined(MI_ENABLE_VULKAN)
             m_bbox.expand(shape->bbox());
 #endif
 
 #if !defined(MI_ENABLE_EMBREE)
-            if constexpr (!dr::is_cuda_v<Float> && !dr::is_metal_v<Float>)
+            if constexpr (!dr::is_cuda_v<Float> && !dr::is_metal_v<Float> && !dr::is_vulkan_v<Float>)
                 m_kdtree->add_shape(shape);
 #endif
             uint32_t type = shape->shape_type();
@@ -48,7 +48,7 @@ MI_VARIANT ShapeGroup<Float, Spectrum>::ShapeGroup(const Properties &props)
         }
     }
 #if !defined(MI_ENABLE_EMBREE)
-    if constexpr (!dr::is_cuda_v<Float> && !dr::is_metal_v<Float>) {
+    if constexpr (!dr::is_cuda_v<Float> && !dr::is_metal_v<Float> && !dr::is_vulkan_v<Float>) {
         if (!m_kdtree->ready())
             m_kdtree->build();
 
@@ -96,7 +96,7 @@ MI_VARIANT void ShapeGroup<Float, Spectrum>::parameters_changed(const std::vecto
 MI_VARIANT typename ShapeGroup<Float, Spectrum>::ScalarSize
 ShapeGroup<Float, Spectrum>::primitive_count() const {
 #if !defined(MI_ENABLE_EMBREE)
-    if constexpr (!dr::is_cuda_v<Float> && !dr::is_metal_v<Float>)
+    if constexpr (!dr::is_cuda_v<Float> && !dr::is_metal_v<Float> && !dr::is_vulkan_v<Float>)
         return m_kdtree->primitive_count();
 #endif
 

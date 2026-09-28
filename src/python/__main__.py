@@ -80,9 +80,9 @@ def main(argv=None):
         mi.set_variant(*([args.mode] if args.mode else mi.variants()))
 
         if args.print_ir:
-            if not mi.variant().startswith(('cuda_', 'llvm_', 'metal_')):
+            if not mi.variant().startswith(('cuda_', 'llvm_', 'metal_', 'vulkan_')):
                 raise RuntimeError('Specified an argument that only makes '
-                                   'sense in a JIT (LLVM/CUDA/Metal) mode!')
+                                   'sense in a JIT (LLVM/CUDA/Metal/Vulkan) mode!')
             dr.set_flag(dr.JitFlag.PrintIR, True)
 
         mi.Log(mi.LogLevel.Info, detail.info_build(thread_count))

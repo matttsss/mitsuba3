@@ -823,7 +823,7 @@ Mesh<Float, Spectrum>::bbox() const {
 
 MI_VARIANT typename Mesh<Float, Spectrum>::ScalarBoundingBox3f
 Mesh<Float, Spectrum>::bbox(ScalarIndex prim_index) const {
-    if constexpr (dr::is_cuda_v<Float> || dr::is_metal_v<Float>)
+    if constexpr (dr::is_cuda_v<Float> || dr::is_metal_v<Float> || dr::is_vulkan_v<Float>)
         Throw("bbox(ScalarIndex) is not available in GPU mode!");
 
     Assert(prim_index <= m_face_count);
@@ -2788,8 +2788,8 @@ Mesh<Float, Spectrum>::describe(ShapeIR &g) const {
     g.vertex_stride = MeshVertexStride * sizeof(InputFloat);
     g.index_ptr  = m_packed_faces.data();
     g.index_stride = 4 * sizeof(ScalarIndex);
-    if constexpr (dr::is_metal_v<Float>) {
-        // Metal has no index stride; hand it the (F, 3) faces view, whose
+    if constexpr (dr::is_metal_v<Float> || dr::is_vulkan_v<Float>) {
+        // Metal and Vulkan have no index stride; hand them the (F, 3) faces view, whose
         // data() call materializes it
         g.index_ptr = faces().array().data();
         g.index_stride = 3 * sizeof(ScalarIndex);

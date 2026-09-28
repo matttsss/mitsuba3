@@ -320,7 +320,7 @@ if (UNIX)
   # Turn on every optional backend so that the generated docstrings don't
   # depend on the platform and configuration used to generate them
   list(APPEND MKDOC_CXXFLAGS -DMI_ENABLE_AUTODIFF=1 -DMI_ENABLE_CUDA=1
-       -DMI_ENABLE_LLVM=1 -DMI_ENABLE_METAL=1 -DMI_ENABLE_EMBREE=1)
+       -DMI_ENABLE_LLVM=1 -DMI_ENABLE_METAL=1 -DMI_ENABLE_VULKAN=1 -DMI_ENABLE_EMBREE=1)
 
   add_custom_target(docstrings USES_TERMINAL COMMAND
     ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/../../resources/mkdocs.py

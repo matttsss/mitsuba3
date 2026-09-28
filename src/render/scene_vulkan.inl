@@ -1,0 +1,204 @@
+/*
+    scene_vulkan.inl -- Templated half of the Vulkan backend: lowers the scene for
+    the acceleration structure builder (src/render/vulkan_accel.cpp) and dispatches
+    rays through jit_vulkan_ray_trace(). State and declarations live in
+    include/mitsuba/render/accel_vulkan.h.
+*/
+
+#include <drjit-core/vulkan.h>
+#include <mitsuba/render/mesh.h>
+#include <mitsuba/render/scene.h>
+#include <mitsuba/render/scene_ir.h>
+#include "vulkan/accel.h"
+
+NAMESPACE_BEGIN(mitsuba)
+
+/// Bit 23 of a TLAS entry's 24-bit instanceCustomIndex that marks shapes with
+/// null transmission, so that shadow traces can classify a hit without a table
+/// lookup
+static constexpr uint32_t VulkanNullBit = 0x800000u;
+
+/// Build the recovery table that resolves a Vulkan hit into \c pi.shape. The
+/// record index is the TLAS entry's userID (returned via \c user_ids, without
+/// \c VulkanNullBit) plus the hit's geometry ID. Records are (shape id,
+/// instance index) pairs when the scene contains instances, plain shape ids
+/// otherwise.
+static void build_vulkan_recovery_table_data(const SceneIR &sd,
+                                             bool has_instances,
+                                             std::vector<uint32_t> &user_ids,
+                                             std::vector<uint32_t> &table) {
+    user_ids.clear();
+    table.clear();
+    user_ids.reserve(sd.instances.size());
+    uint32_t cursor = 0;
+    for (const InstanceEntry &inst : sd.instances) {
+        bool null = false;
+        for (const ShapeIR &g : sd.blases[inst.blas_index].geoms)
+            null |= (g.visibility_mask & (uint32_t) RayMask::Null) != 0;
+        user_ids.push_back(cursor | (null ? VulkanNullBit : 0u));
+        for (const ShapeIR &g : sd.blases[inst.blas_index].geoms) {
+            table.push_back(jit_registry_id(g.ctx));
+            if (has_instances)
+                table.push_back(inst.instance_index);
+            cursor++;
+        }
+    }
+}
+
+// -----------------------------------------------------------------------
+//  VulkanAccel<Float, Spectrum> -- lifecycle
+// -----------------------------------------------------------------------
+
+template <typename Float, typename Spectrum>
+void VulkanAccel<Float, Spectrum>::init(Scene<Float, Spectrum> *scene,
+                                        const Properties & /*props*/) {
+    SceneIR sd = SceneIRBuilder<Float, Spectrum>::build(scene);
+
+    if (sd.instances.empty()) {
+        Log(Debug, "accel_init_vulkan(): scene contains no shapes.");
+        return;
+    }
+
+    has_instances = false;
+    for (const InstanceEntry &inst : sd.instances)
+        has_instances |= inst.instance_index != 0;
+
+    std::vector<uint32_t> user_ids, table;
+    build_vulkan_recovery_table_data(sd, has_instances, user_ids, table);
+    using UInt32 = dr::uint32_array_t<Float>;
+    geom_shape_table =
+        dr::load<DynamicBuffer<UInt32>>(table.data(), table.size());
+
+    std::tie(accel, scene_index) =
+        build_vulkan_accel(sd, user_ids, scene->compact_accel());
+
+    accel_handle = UInt64::steal(jit_vulkan_scene_owner_handle(scene_index));
+}
+
+template <typename Float, typename Spectrum>
+void VulkanAccel<Float, Spectrum>::rebuild(
+    Scene<Float, Spectrum> *scene) {
+    release();
+    Properties props;
+    init(scene, props);
+}
+
+template <typename Float, typename Spectrum>
+void VulkanAccel<Float, Spectrum>::release() {
+    if (!accel && scene_index == 0)
+        return; // Empty scene or already released
+    accel_handle = 0;
+    release_vulkan_accel(accel, scene_index);
+    accel = nullptr;
+    scene_index = 0;
+}
+
+// -----------------------------------------------------------------------
+//  VulkanAccel<Float, Spectrum> -- ray queries
+// -----------------------------------------------------------------------
+
+template <typename Float, typename Spectrum>
+void VulkanAccel<Float, Spectrum>::trace(const Ray3f &ray, Mask active,
+                                         UInt32 ray_mask,
+                                         uint32_t out[8], bool shadow) const {
+    using Single = dr::float32_array_t<Float>;
+    dr::Array<Single, 3> ray_o(ray.o), ray_d(ray.d);
+    Single ray_tmin(0.f), ray_tmax(ray.maxt);
+    Single ray_time(ray.time);
+
+    // Be careful with 'ray.maxt' in double precision variants
+    if constexpr (!std::is_same_v<Single, Float>)
+        ray_tmax = dr::minimum(ray_tmax, dr::Largest<Single>);
+
+    uint32_t args[10] = {
+        ray_o.x().index(), ray_o.y().index(), ray_o.z().index(),
+        ray_d.x().index(), ray_d.y().index(), ray_d.z().index(),
+        ray_tmin.index(), ray_tmax.index(), ray_time.index(),
+        ray_mask.index()
+    };
+
+    jit_vulkan_ray_trace(10, args, active.index(), out, 8, scene_index, shadow);
+}
+
+template <typename Float, typename Spectrum>
+typename VulkanAccel<Float, Spectrum>::PreliminaryIntersection3f
+VulkanAccel<Float, Spectrum>::ray_intersect_preliminary(
+    const Scene<Float, Spectrum> * /*scene*/, const Ray3f &ray, Mask /*coh*/,
+    bool /*reorder*/, UInt32 /*reorder_hint*/, uint32_t /*reorder_hint_bits*/,
+    Mask active, UInt32 ray_mask) const {
+    using Single = dr::float32_array_t<Float>;
+
+    PreliminaryIntersection3f pi = dr::zeros<PreliminaryIntersection3f>();
+    if (scene_index == 0) // Empty scene: every ray misses
+        return pi;
+
+    // out: [valid, distance, bary_u, bary_v, instance_id, primitive_id,
+    //       geometry_id, user_instance_id]
+    uint32_t out[8];
+    trace(ray, active, ray_mask, out, /* shadow = */ false);
+
+    Mask valid = Mask::steal(out[0]);
+
+    pi.valid      = valid;
+    pi.t          = Float(Single::steal(out[1]));
+    pi.prim_uv    = Point2f(Float(Single::steal(out[2])),
+                            Float(Single::steal(out[3])));
+    pi.prim_index = UInt32::steal(out[5]);
+
+    UInt32::steal(out[4]); // raw TLAS entry index, unused
+    UInt32 geometry_id = UInt32::steal(out[6]);
+    UInt32 user_id     = UInt32::steal(out[7]);
+
+    // Recover the hit shape (and instance index, if instanced) from the
+    // record at userID + geometry ID. The masked gather leaves missed lanes
+    // with a null shape.
+    UInt32 index = (user_id & ~VulkanNullBit) + geometry_id;
+    if (has_instances) {
+        dr::Array<UInt32, 2> rec =
+            dr::gather<dr::Array<UInt32, 2>>(geom_shape_table, index, valid);
+        pi.shape = dr::reinterpret_array<ShapePtr, UInt32>(rec[0]);
+        pi.instance_index = rec[1];
+    } else {
+        UInt32 shape_id = dr::gather<UInt32>(geom_shape_table, index, valid);
+        pi.shape = dr::reinterpret_array<ShapePtr, UInt32>(shape_id);
+    }
+
+    return pi;
+}
+
+template <typename Float, typename Spectrum>
+ShadowTest<typename VulkanAccel<Float, Spectrum>::Mask>
+VulkanAccel<Float, Spectrum>::ray_test(const Scene<Float, Spectrum> * /*scene*/,
+                                       const Ray3f &ray, Mask /*coherent*/,
+                                       Mask active,
+                                       UInt32 ray_mask,
+                                       bool skip_null) const {
+    if (scene_index == 0) // Empty scene: no occluders
+        return { dr::zeros<Mask>(dr::width(ray.o)), Mask(false) };
+
+    uint32_t out[8];
+    trace(ray, active, ray_mask, out, /* shadow = */ true);
+
+    // Only the hit flag and the user ID of the hit that ended the traversal
+    // are needed here
+    Mask hit = Mask::steal(out[0]);
+    UInt32 user_id = UInt32::steal(out[7]);
+    for (int i = 1; i < 7; ++i)
+        jit_var_dec_ref(out[i]);
+
+    if (!skip_null)
+        return { hit, Mask(false) };
+
+    Mask null = hit && (user_id & VulkanNullBit) != 0u;
+    return { hit && !null, null };
+}
+
+template <typename Float, typename Spectrum>
+typename VulkanAccel<Float, Spectrum>::SurfaceInteraction3f
+VulkanAccel<Float, Spectrum>::ray_intersect_naive(
+    const Scene<Float, Spectrum> *scene, const Ray3f &ray, Mask active) const {
+    // Vulkan has no brute-force path; route through the accelerated query.
+    return scene->ray_intersect(ray, active);
+}
+
+NAMESPACE_END(mitsuba)

@@ -68,7 +68,7 @@ def list_all_render_test_configs():
     """
     configs = []
     for variant in mi.variants():
-        is_jit = "cuda" in variant or "llvm" in variant or "metal" in variant
+        is_jit = "cuda" in variant or "llvm" in variant or "metal" in variant or "vulkan" in variant
         is_polarized = "polarized" in variant
 
         for scene_fname in SCENES:
@@ -161,7 +161,7 @@ def z_test(mean, sample_count, reference, reference_var):
 def test_render(variant, scene_fname, integrator_type, jit_flags_key):
     mi.set_variant(variant)
 
-    if 'cuda' in variant or 'llvm' in variant or 'metal' in variant:
+    if 'cuda' in variant or 'llvm' in variant or 'metal' in variant or 'vulkan' in variant:
         dr.flush_malloc_cache()
         for k, v in JIT_FLAG_OPTIONS[jit_flags_key].items():
             dr.set_flag(k, bool(v))
@@ -173,6 +173,9 @@ def test_render(variant, scene_fname, integrator_type, jit_flags_key):
 
     if os.name == 'nt' and 'test_various_emitters' in ref_fname and 'cuda' in variant:
         pytest.skip('Skipping flaky test (likely an OptiX miscompilation) on Windows')
+
+    if 'vulkan' in variant and 'motion_blur' in scene_fname:
+        pytest.skip('Animated instance transforms (motion blur) are not supported by the Vulkan backend')
 
     ref_img = to_array(mi.Bitmap(ref_fname))
     ref_var_img = to_array(mi.Bitmap(ref_var_fname))

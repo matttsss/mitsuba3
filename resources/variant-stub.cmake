@@ -4,6 +4,7 @@
 file(READ ${CMAKE_ARGV3} FILE_CONTENTS)
 string(REPLACE "drjit.llvm" "drjit.auto" FILE_CONTENTS "${FILE_CONTENTS}")
 string(REPLACE "drjit.cuda" "drjit.auto" FILE_CONTENTS "${FILE_CONTENTS}")
+string(REPLACE "drjit.vulkan" "drjit.auto" FILE_CONTENTS "${FILE_CONTENTS}")
 string(REPLACE "types.CapsuleType" "object" FILE_CONTENTS "${FILE_CONTENTS}")
 string(REGEX REPLACE "(mitsuba\\.)?filesystem\\.path" "str" FILE_CONTENTS "${FILE_CONTENTS}")
 string(REPLACE "scalar_rgb." "" FILE_CONTENTS "${FILE_CONTENTS}")

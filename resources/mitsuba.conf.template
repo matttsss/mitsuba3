@@ -459,5 +459,127 @@
     "metal_ad_spectral_polarized": {
         "float": "dr::DiffArray<JitBackend::Metal, float>",
         "spectrum": "MuellerMatrix<Spectrum<Float, 4>>"
+    },
+
+    # Vulkan variant definitions
+
+    "vulkan_mono": {
+        "float": "dr::VulkanArray<float>",
+        "spectrum": "Color<Float, 1>"
+    },
+
+    "vulkan_mono_double": {
+        "float": "dr::VulkanArray<double>",
+        "spectrum": "Color<Float, 1>"
+    },
+
+    "vulkan_mono_polarized": {
+        "float": "dr::VulkanArray<float>",
+        "spectrum": "MuellerMatrix<Color<Float, 1>>"
+    },
+
+    "vulkan_mono_polarized_double": {
+        "float": "dr::VulkanArray<double>",
+        "spectrum": "MuellerMatrix<Color<Float, 1>>"
+    },
+
+    "vulkan_rgb": {
+        "float": "dr::VulkanArray<float>",
+        "spectrum": "Color<Float, 3>"
+    },
+
+    "vulkan_rgb_double": {
+        "float": "dr::VulkanArray<double>",
+        "spectrum": "Color<Float, 3>"
+    },
+
+    "vulkan_rgb_polarized": {
+        "float": "dr::VulkanArray<float>",
+        "spectrum": "MuellerMatrix<Color<Float, 3>>"
+    },
+
+    "vulkan_rgb_polarized_double": {
+        "float": "dr::VulkanArray<double>",
+        "spectrum": "MuellerMatrix<Color<Float, 3>>"
+    },
+
+    "vulkan_spectral": {
+        "float": "dr::VulkanArray<float>",
+        "spectrum": "Spectrum<Float, 4>"
+    },
+
+    "vulkan_spectral_double": {
+        "float": "dr::VulkanArray<double>",
+        "spectrum": "Spectrum<Float, 4>"
+    },
+
+    "vulkan_spectral_polarized": {
+        "float": "dr::VulkanArray<float>",
+        "spectrum": "MuellerMatrix<Spectrum<Float, 4>>"
+    },
+
+    "vulkan_spectral_polarized_double": {
+        "float": "dr::VulkanArray<double>",
+        "spectrum": "MuellerMatrix<Spectrum<Float, 4>>"
+    },
+
+    "vulkan_ad_mono": {
+        "float": "dr::DiffArray<JitBackend::Vulkan, float>",
+        "spectrum": "Color<Float, 1>"
+    },
+
+    "vulkan_ad_mono_double": {
+        "float": "dr::DiffArray<JitBackend::Vulkan, double>",
+        "spectrum": "Color<Float, 1>"
+    },
+
+    "vulkan_ad_mono_polarized": {
+        "float": "dr::DiffArray<JitBackend::Vulkan, float>",
+        "spectrum": "MuellerMatrix<Color<Float, 1>>"
+    },
+
+    "vulkan_ad_mono_polarized_double": {
+        "float": "dr::DiffArray<JitBackend::Vulkan, double>",
+        "spectrum": "MuellerMatrix<Color<Float, 1>>"
+    },
+
+    "vulkan_ad_rgb": {
+        "float": "dr::DiffArray<JitBackend::Vulkan, float>",
+        "spectrum": "Color<Float, 3>"
+    },
+
+    "vulkan_ad_rgb_double": {
+        "float": "dr::DiffArray<JitBackend::Vulkan, double>",
+        "spectrum": "Color<Float, 3>"
+    },
+
+    "vulkan_ad_rgb_polarized": {
+        "float": "dr::DiffArray<JitBackend::Vulkan, float>",
+        "spectrum": "MuellerMatrix<Color<Float, 3>>"
+    },
+
+    "vulkan_ad_rgb_polarized_double": {
+        "float": "dr::DiffArray<JitBackend::Vulkan, double>",
+        "spectrum": "MuellerMatrix<Color<Float, 3>>"
+    },
+
+    "vulkan_ad_spectral": {
+        "float": "dr::DiffArray<JitBackend::Vulkan, float>",
+        "spectrum": "Spectrum<Float, 4>"
+    },
+
+    "vulkan_ad_spectral_double": {
+        "float": "dr::DiffArray<JitBackend::Vulkan, double>",
+        "spectrum": "Spectrum<Float, 4>"
+    },
+
+    "vulkan_ad_spectral_polarized": {
+        "float": "dr::DiffArray<JitBackend::Vulkan, float>",
+        "spectrum": "MuellerMatrix<Spectrum<Float, 4>>"
+    },
+
+    "vulkan_ad_spectral_polarized_double": {
+        "float": "dr::DiffArray<JitBackend::Vulkan, double>",
+        "spectrum": "MuellerMatrix<Spectrum<Float, 4>>"
     }
 }

@@ -139,6 +139,9 @@ def test03_sample_silhouette_bijective(variants_vec_rgb, direction):
 def test04_primitive_silhouette_projection(variants_vec_rgb):
     """primitive_silhouette_projection() moves interactions onto
     perimeter edges."""
+    if not dr.is_diff_v(mi.Float):
+        pytest.skip("Only relevant in AD-enabled variants!")
+
     mesh = mi.load_dict({
         "type": "ply",
         "filename": "resources/data/tests/ply/rectangle_uv.ply",

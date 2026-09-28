@@ -37,6 +37,8 @@ template <typename T> std::string type_suffix() {
         id += 'L';
     else if constexpr (dr::is_cuda_v<V>)
         id += 'C';
+    else if constexpr (dr::is_vulkan_v<V>)
+        id += 'V';
     else if constexpr (dr::is_dynamic_array_v<V>)
         id += 'X';
 

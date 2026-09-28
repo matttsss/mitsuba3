@@ -27,6 +27,13 @@ if (MI_ENABLE_METAL)
     PROPERTIES COMPILE_FLAGS "-fobjc-arc")
 endif()
 
+if (MI_ENABLE_VULKAN)
+  set(LIBRENDER_EXTRA_SRC
+    vulkan_accel.cpp vulkan/accel.h
+    ${LIBRENDER_EXTRA_SRC}
+  )
+endif()
+
 add_library(mitsuba-render OBJECT
   ${INC_DIR}/fwd.h
   ${INC_DIR}/ior.h

@@ -180,6 +180,7 @@ NB_MODULE(MI_VARIANT_NAME, m) {
     m.attr("is_llvm") = Backend == JitBackend::LLVM;
     m.attr("is_cuda") = Backend == JitBackend::CUDA;
     m.attr("is_metal") = Backend == JitBackend::Metal;
+    m.attr("is_vulkan") = Backend == JitBackend::Vulkan;
     m.attr("is_jit") = dr::is_jit_v<Float>;
     m.attr("is_ad") = dr::is_diff_v<Float>;
 
@@ -272,7 +273,8 @@ NB_MODULE(MI_VARIANT_NAME, m) {
     if (!is_stub_gen) {
         color_management_static_initialization(dr::is_cuda_v<Float>,
                                                dr::is_llvm_v<Float>,
-                                               dr::is_metal_v<Float>);
+                                               dr::is_metal_v<Float>,
+                                               dr::is_vulkan_v<Float>);
         Scene::static_accel_initialization();
     }
 }

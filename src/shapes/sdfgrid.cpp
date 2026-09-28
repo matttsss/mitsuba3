@@ -205,7 +205,7 @@ public:
         m_voxel_size = voxel_size;
         dr::make_opaque(m_inv_shape, m_voxel_size);
 
-        if constexpr (!dr::is_cuda_v<Float>) {
+        if constexpr (!dr::is_cuda_v<Float> && !dr::is_vulkan_v<Float>) {
             dr::eval(m_grid_texture.value()); // Make sure the SDF data is evaluated
             m_host_grid_data = m_grid_texture.tensor().data();
         }
@@ -265,7 +265,7 @@ public:
     }
 
     ScalarBoundingBox3f bbox(ScalarIndex prim_index) const override {
-        if constexpr (dr::is_cuda_v<Float> || dr::is_metal_v<Float>)
+        if constexpr (dr::is_cuda_v<Float> || dr::is_metal_v<Float> || dr::is_vulkan_v<Float>)
             NotImplementedError("bbox(ScalarIndex prim_index)");
 
         return reinterpret_cast<InputScalarBoundingBox3f*>(m_bboxes_ptr)[prim_index];
@@ -502,7 +502,7 @@ public:
     void describe(ShapeIR &g) const override {
         Base::describe(g);
         // The GPU backends build from the tightly packed device boxes
-        if constexpr (dr::is_cuda_v<Float> || dr::is_metal_v<Float>)
+        if constexpr (dr::is_cuda_v<Float> || dr::is_metal_v<Float> || dr::is_vulkan_v<Float>)
             g.aabb_buffer = m_bboxes_ptr;
     }
 

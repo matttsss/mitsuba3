@@ -92,7 +92,7 @@ def make_tmpfile(request, tmpdir_factory):
 
 
 def check_vectorization(kernel, arg_dims = [], width = 125, atol=1e-6,
-                        modes=['llvm', 'cuda', 'llvm_ad', 'cuda_ad']):
+                        modes=['llvm', 'cuda', 'vulkan', 'llvm_ad', 'cuda_ad', 'vulkan_ad']):
     """
     Helper routine which compares evaluations of the vectorized and
     non-vectorized version of a kernel using available variants (e.g. LLVM, CUDA).

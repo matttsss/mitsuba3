@@ -32,12 +32,13 @@ def _cholesky_solve(solver, b):
     Solve for the right-hand side ``b`` and return the result as a tensor.
 
     Cholespy writes the solution into its second argument, for which it
-    expects a CUDA or host array. On the Metal backend it instead receives
-    a host copy, into which it would write the solution unnoticed.
+    expects a CUDA or host array. On the Metal and Vulkan backends it instead
+    receives a host copy, into which it would write the solution unnoticed.
     """
-    if dr.backend_v(mi.Float) == dr.JitBackend.Metal:
+    if dr.backend_v(mi.Float) in (dr.JitBackend.Metal, dr.JitBackend.Vulkan):
         import numpy as np
-        b_np = np.array(b, dtype=np.float32)
+        dtype = np.float64 if mi.variant().endswith('double') else np.float32
+        b_np = np.array(b, dtype=dtype)
         x_np = np.zeros_like(b_np)
         solver.solve(b_np, x_np)
         return mi.TensorXf(x_np)

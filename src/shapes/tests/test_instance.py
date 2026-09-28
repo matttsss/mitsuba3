@@ -498,6 +498,8 @@ def test08_ad_gradients_combined(variants_all_ad_rgb):
 @pytest.mark.parametrize("num_keyframes", [2, 3, 5])
 def test09_animated_instance(variants_all_rgb, num_keyframes):
     """Rays hit a translating instance at the interpolated position"""
+    if mi.is_vulkan:
+        pytest.skip("Animated instance motion blur is not supported on the Vulkan backend.")
     from mitsuba import ScalarTransform4f as T
 
     keyframes = {}
@@ -542,6 +544,8 @@ def test09_animated_instance(variants_all_rgb, num_keyframes):
 
 def test10_animated_instance_rotation_scaling(variants_all_rgb):
     """Rotation and scale of an instance are interpolated during ray tracing"""
+    if mi.is_vulkan:
+        pytest.skip("Animated instance motion blur is not supported on the Vulkan backend.")
     from mitsuba import ScalarTransform4f as T
 
     scene = mi.load_dict({
@@ -648,6 +652,8 @@ def test12_animated_bbox(variant_scalar_rgb):
 
 def test13_animated_instances_with_differing_time_ranges(variants_all_rgb):
     """Instances with different keyframe ranges follow the backend's clamping rules"""
+    if mi.is_vulkan:
+        pytest.skip("Animated instance motion blur is not supported on the Vulkan backend.")
     from mitsuba import ScalarTransform4f as T
 
     def instance(keyframes):

@@ -17,14 +17,14 @@ NAMESPACE_BEGIN(math)
 /**
  * Floating point type in which the ray tracing backend operates
  *
- * Embree, OptiX and Metal trace in single precision regardless of the
+ * Embree, OptiX, Metal and Vulkan trace in single precision regardless of the
  * variant. Only the native kd-tree works in the precision of the variant.
  */
 template <typename T> using trace_float_t =
 #if defined(MI_ENABLE_EMBREE)
     dr::float32_array_t<T>;
 #else
-    std::conditional_t<dr::is_cuda_v<T> || dr::is_metal_v<T>,
+    std::conditional_t<dr::is_cuda_v<T> || dr::is_metal_v<T> || dr::is_vulkan_v<T>,
                        dr::float32_array_t<T>, T>;
 #endif
 

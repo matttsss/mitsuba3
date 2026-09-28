@@ -150,6 +150,8 @@ def test01_spawn_ray_no_self_hit(variants_vec_backends_once, shape, offset, scal
     within a small multiple of the roundoff of the quantities involved."""
     # The last configuration places the ray origins far away from a shape
     # near the world origin, which catches bounds that ignore the ray extent
+    if mi.variant().startswith('vulkan') and shape in ('bsplinecurve', 'linearcurve'):
+        pytest.skip('Curve shapes are not supported by the Vulkan hardware ray tracing backend')
     check_linearcurve(shape, scale)
     scene, center, size = make_scene(shape, offset, scale, tmp_path)
     si, active, sampler = hits(scene, center, size, 1 << 14, dist,
@@ -176,6 +178,8 @@ def test02_spawn_ray_to_no_false_occlusion(variants_vec_backends_once, shape,
         if shape not in SAMPLED:
             pytest.skip('Shape does not implement sample_position()')
         receiver = shape
+    if mi.variant().startswith('vulkan') and shape in ('bsplinecurve', 'linearcurve'):
+        pytest.skip('Curve shapes are not supported by the Vulkan hardware ray tracing backend')
     check_linearcurve(shape, scale)
     scene, center, size = make_scene(shape, offset, scale, tmp_path, receiver)
     si, active, sampler = hits(scene, center, size, 1 << 14, front_only=shape in OPEN)

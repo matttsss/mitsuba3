@@ -78,6 +78,12 @@ NB_MODULE(mitsuba_ext, m) {
     m.attr("MI_ENABLE_METAL") = false;
 #endif
 
+#if defined(MI_ENABLE_VULKAN)
+    m.attr("MI_ENABLE_VULKAN") = true;
+#else
+    m.attr("MI_ENABLE_VULKAN") = false;
+#endif
+
 #if defined(MI_ENABLE_EMBREE)
     m.attr("MI_ENABLE_EMBREE") = true;
 #else

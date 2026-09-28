@@ -1738,7 +1738,7 @@ struct Scratch {
 // Set JIT scopes while instantating nodes
 struct ScopedSetJITScope {
     ScopedSetJITScope(uint32_t backend, uint32_t scope) : backend(backend), backup(0) {
-#if defined(MI_ENABLE_LLVM) || defined(MI_ENABLE_CUDA) || defined(MI_ENABLE_METAL)
+#if defined(MI_ENABLE_LLVM) || defined(MI_ENABLE_CUDA) || defined(MI_ENABLE_METAL) || defined(MI_ENABLE_VULKAN)
         if (backend) {
             backup = jit_scope((JitBackend) backend);
             jit_set_scope((JitBackend) backend, scope);
@@ -1747,7 +1747,7 @@ struct ScopedSetJITScope {
     }
 
     ~ScopedSetJITScope() {
-#if defined(MI_ENABLE_LLVM) || defined(MI_ENABLE_CUDA) || defined(MI_ENABLE_METAL)
+#if defined(MI_ENABLE_LLVM) || defined(MI_ENABLE_CUDA) || defined(MI_ENABLE_METAL) || defined(MI_ENABLE_VULKAN)
         if (backend)
             jit_set_scope((JitBackend) backend, backup);
 #endif
@@ -1790,13 +1790,15 @@ static Task* instantiate_node(const ParserConfig &config,
     uint32_t backend = 0, scope = 0;
 
     if (config.parallel) {
-#if defined(MI_ENABLE_LLVM) || defined(MI_ENABLE_CUDA) || defined(MI_ENABLE_METAL)
+#if defined(MI_ENABLE_LLVM) || defined(MI_ENABLE_CUDA) || defined(MI_ENABLE_METAL) || defined(MI_ENABLE_VULKAN)
         if (string::starts_with(config.variant, "cuda_"))
             backend = (uint32_t) JitBackend::CUDA;
         else if (string::starts_with(config.variant, "llvm_"))
             backend = (uint32_t) JitBackend::LLVM;
         else if (string::starts_with(config.variant, "metal_"))
             backend = (uint32_t) JitBackend::Metal;
+        else if (string::starts_with(config.variant, "vulkan_"))
+            backend = (uint32_t) JitBackend::Vulkan;
 
         if (backend) {
             jit_new_scope((JitBackend) backend);
@@ -1863,10 +1865,11 @@ static Task* instantiate_node(const ParserConfig &config,
         if (s.objects.empty())
             s.objects.push_back(obj);
 
-#if defined(MI_ENABLE_METAL)
+#if defined(MI_ENABLE_METAL) || defined(MI_ENABLE_VULKAN)
         // Commit this worker's per-thread command buffer so its buffer uploads
         // are ordered (on the shared queue) ahead of later consuming kernels.
-        if (config.parallel && backend == (uint32_t) JitBackend::Metal)
+        if (config.parallel && (backend == (uint32_t) JitBackend::Metal ||
+                                backend == (uint32_t) JitBackend::Vulkan))
             jit_flush_thread();
 #endif
 
@@ -1921,7 +1924,7 @@ static Task* instantiate_node(const ParserConfig &config,
         // Instantiate the root
         instantiate();
 
-#if defined(MI_ENABLE_LLVM) || defined(MI_ENABLE_CUDA) || defined(MI_ENABLE_METAL)
+#if defined(MI_ENABLE_LLVM) || defined(MI_ENABLE_CUDA) || defined(MI_ENABLE_METAL) || defined(MI_ENABLE_VULKAN)
         if (backend && config.parallel)
             jit_new_scope((JitBackend) backend);
 #endif
@@ -1964,7 +1967,7 @@ std::vector<ref<Object>> instantiate(const ParserConfig &config, const ParserSta
         handler(paths);
     }
 
-#if defined(MI_ENABLE_LLVM) || defined(MI_ENABLE_CUDA) || defined(MI_ENABLE_METAL)
+#if defined(MI_ENABLE_LLVM) || defined(MI_ENABLE_CUDA) || defined(MI_ENABLE_METAL) || defined(MI_ENABLE_VULKAN)
     // Flush pending side effects here and now, to avoid potentially dirty
     // user-provided Dr.Jit arrays/tensor from being propagated to plugin
     // loaders running on a different thread. Side effects are queued in

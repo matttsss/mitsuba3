@@ -241,7 +241,8 @@ def test07_update_geometry_accel(variants_vec_rgb):
     V, F = pos.shape[0], faces.shape[0]
 
     dr.enable_grad(params['rect.positions'])
-    assert dr.grad_enabled(params['rect.positions'])
+    if dr.is_diff_v(mi.Float):
+        assert dr.grad_enabled(params['rect.positions'])
 
     center = np.arange(V, V + F, dtype=np.uint32)
     fan = np.concatenate([np.stack([faces[:, k], faces[:, (k + 1) % 3],

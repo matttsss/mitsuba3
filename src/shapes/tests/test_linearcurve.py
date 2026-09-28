@@ -137,11 +137,14 @@ def test05_ray_intersect_vec(variant_scalar_rgb):
         dr.eval(t)
         return t
 
-    check_vectorization(kernel, arg_dims = [3], atol=1e-5)
+    check_vectorization(kernel, arg_dims = [3], atol=1e-5,
+                        modes=['llvm', 'cuda', 'llvm_ad', 'cuda_ad'])
 
 
 @fresolver_append_path
 def test08_instancing(variants_all_rgb):
+    if mi.is_vulkan:
+        pytest.skip("Curve shapes are not supported on the Vulkan backend.")
     T = mi.ScalarTransform4f
     scene = mi.load_dict({
         "type" : "scene",
@@ -184,6 +187,8 @@ def test08_instancing(variants_all_rgb):
 def test09_backface_culling(variants_vec_rgb):
     if "metal" in variants_vec_rgb:
         pytest.skip("Metal accepts inside-tube round curve hits.")
+    if "vulkan" in variants_vec_rgb:
+        pytest.skip("Curve shapes are not supported on the Vulkan backend.")
 
     scene =  mi.load_dict({
         "type" : "scene",

@@ -1,0 +1,40 @@
+/*
+    vulkan/accel.h -- Interface to the Vulkan acceleration structure builder
+    (src/render/vulkan_accel.cpp). It consumes the lowered scene (the
+    `BlasEntry` / `InstanceEntry` descriptors from scene_ir.h), turns it into
+    Vulkan acceleration structures, and registers them with Dr.Jit via
+    jit_vulkan_configure_scene().
+*/
+
+#pragma once
+
+#if defined(MI_ENABLE_VULKAN)
+
+#include <mitsuba/core/platform.h>
+#include <mitsuba/render/scene_ir.h>
+#include <utility>
+
+NAMESPACE_BEGIN(mitsuba)
+
+/// Opaque handle owning the Vulkan objects of a built scene
+struct VulkanAccelData;
+
+/// Build the lowered scene's acceleration structures (same-kind BLASes plus the
+/// flattened TLAS instances) and register them with Dr.Jit. ``user_ids``
+/// supplies each TLAS entry's userID (see scene_vulkan.inl). ``compact``
+/// shrinks the BLASes after building. Returns the owning `VulkanAccelData` and
+/// the scene's JIT variable index (caller-owned), to pass to
+/// jit_vulkan_ray_trace().
+extern MI_EXPORT_LIB std::pair<VulkanAccelData *, uint32_t>
+build_vulkan_accel(const SceneIR &sd, const std::vector<uint32_t> &user_ids,
+                   bool compact);
+
+/// Release a scene built with `build_vulkan_accel()`: drop the JIT variable
+/// reference and free the Vulkan objects (deferred until no kernel/recording
+/// references it).
+extern MI_EXPORT_LIB void release_vulkan_accel(VulkanAccelData *accel,
+                                               uint32_t scene_index);
+
+NAMESPACE_END(mitsuba)
+
+#endif // MI_ENABLE_VULKAN

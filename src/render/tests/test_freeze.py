@@ -206,6 +206,8 @@ def test02_pose_estimation(variants_vec_rgb, integrator, auto_opaque):
     currently cannot be recorded.
     """
 
+    if not dr.is_diff_v(mi.Float):
+        pytest.skip('Only relevant in AD-enabled variants!')
     if mi.is_polarized:
         pytest.skip('Test must be adapted to polarized rendering.')
 
@@ -377,6 +379,8 @@ def test03_optimize_color(variants_vec_rgb, auto_opaque):
     Tests freezing of optimizing a color parameter through backpropagation, by
     passing the gradients through the frozen function inputs.
     """
+    if not dr.is_diff_v(mi.Float):
+        pytest.skip('Only relevant in AD-enabled variants!')
     if mi.is_polarized:
         pytest.skip('Test must be adapted to polarized rendering.')
 
@@ -943,6 +947,9 @@ def test09_shape(variants_vec_rgb, tmp_path, shape, auto_opaque):
     """
     Tests that it is possible to freeze rendeirng a scene with each shape type.
     """
+    if mi.variant().startswith("vulkan") and shape in ("bsplinecurve", "linearcurve"):
+        pytest.skip("Curve shapes are not supported by the Vulkan hardware ray tracing backend")
+
     w, h = (16, 16)
     n = 5
 
@@ -1022,6 +1029,8 @@ def test11_optimizer(variants_vec_rgb, optimizer, auto_opaque):
     n = 10
     k = "red.reflectance.value"
 
+    if not dr.is_diff_v(mi.Float):
+        pytest.skip('Only relevant in AD-enabled variants!')
     if mi.is_polarized:
         pytest.skip('Test must be adapted to polarized rendering.')
 

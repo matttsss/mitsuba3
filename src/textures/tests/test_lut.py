@@ -21,7 +21,8 @@ def si_at(uv=(0.5, 0.5)):
 def lerp_atol():
     """Tolerance of linear interpolation between entries that differ by up to 2.
     GPU texture units quantize the interpolation weight to 8 bits."""
-    hw_tex = dr.backend_v(mi.Float) in (dr.JitBackend.CUDA, dr.JitBackend.Metal)
+    hw_tex = dr.backend_v(mi.Float) in (
+        dr.JitBackend.CUDA, dr.JitBackend.Metal, dr.JitBackend.Vulkan)
     return 1e-2 if hw_tex else 1e-6
 
 

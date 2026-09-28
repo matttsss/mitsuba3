@@ -131,7 +131,7 @@ def set_variant(*args: str) -> None:
     if _variant != old_variant:
         # AD integrators and loaders subclass variant-specific types and must
         # be re-imported whenever a JIT variant becomes active
-        if _variant.startswith(('llvm_', 'cuda_', 'metal_')):
+        if _variant.startswith(('llvm_', 'cuda_', 'metal_', 'vulkan_')):
             for module_name in ('mitsuba.python.ad.integrators',
                                 'mitsuba.python.ad.loaders'):
                 _importlib.reload(_importlib.import_module(module_name))
@@ -169,7 +169,7 @@ _import_symbols(python)
 
 if _os.environ.get('NB_STUBGEN'):
     # Score and set the variant with the largest API surface for stub generation
-    _S = {'scalar': 1, 'llvm': 200, 'cuda': 300, 'mono': 10, 'rgb': 20,
-          'spectral': 30, 'polarized': 100}
+    _S = {'scalar': 1, 'llvm': 200, 'vulkan': 250, 'cuda': 300, 'mono': 10,
+          'rgb': 20, 'spectral': 30, 'polarized': 100}
     set_variant(max(variants(),
                     key=lambda v: sum(s for f, s in _S.items() if f in v)))

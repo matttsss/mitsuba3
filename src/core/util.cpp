@@ -313,6 +313,10 @@ std::string info_features() {
     oss << " metal";
 #endif
 
+#if defined(MI_ENABLE_VULKAN)
+    oss << " vulkan";
+#endif
+
 #if defined(MI_ENABLE_LLVM)
     oss << " llvm";
 #endif

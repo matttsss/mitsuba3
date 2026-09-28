@@ -142,7 +142,8 @@ def test06_ray_intersect_vec(variant_scalar_rgb):
         dr.eval(t)
         return t
 
-    check_vectorization(kernel, arg_dims = [3], atol=1e-5)
+    check_vectorization(kernel, arg_dims = [3], atol=1e-5,
+                        modes=['llvm', 'cuda', 'llvm_ad', 'cuda_ad'])
 
 
 # TODO: Enable OptiX once the required drivers are above v531
@@ -229,6 +230,8 @@ def test07_differentiable_surface_interaction_ray_forward_follow_shape(variant_l
 
 @fresolver_append_path
 def test08_eval_parameterization(variants_vec_rgb):
+    if mi.is_vulkan:
+        pytest.skip("Curve shapes are not supported on the Vulkan backend.")
     scene = mi.load_dict({
         "type" : "scene",
         "curve" : {
@@ -257,6 +260,8 @@ def test08_eval_parameterization(variants_vec_rgb):
 
 @fresolver_append_path
 def test09_instancing(variants_vec_rgb):
+    if mi.is_vulkan:
+        pytest.skip("Curve shapes are not supported on the Vulkan backend.")
     scene = mi.load_dict({
         "type" : "scene",
         "group": {

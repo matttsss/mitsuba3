@@ -302,7 +302,7 @@ public:
     }
 
     void parameters_changed() {
-        if constexpr (!dr::is_cuda_v<Float>)
+        if constexpr (!dr::is_cuda_v<Float> && !dr::is_vulkan_v<Float>)
             m_data_pointer = m_data.data();
 
         for (auto& [name, attr]: m_attributes) {

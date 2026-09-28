@@ -10,7 +10,7 @@
 template<typename Float_>
 void bind_spline(nb::module_ &m) {
     MI_PY_IMPORT_TYPES()
-    if constexpr (!dr::is_cuda_v<Float_>) {
+    if constexpr (!dr::is_cuda_v<Float_> && !dr::is_vulkan_v<Float_>) {
         using FloatX = DynamicBuffer<Float_>;
         m.def("eval_spline", spline::eval_spline<ScalarFloat>, "f0"_a, "f1"_a,
               "d0"_a, "d1"_a, "t"_a, D(spline, eval_spline))
